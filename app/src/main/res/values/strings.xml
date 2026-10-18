@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Universal Find</string>
+    <string name="accessibility_service_description">Universal Find uses this service strictly to locate text nodes on screen when you trigger search in View Hierarchy mode. No text is saved or transmitted off-device.</string>
+    <string name="floating_service_notification_channel">Universal Find Overlay</string>
+    <string name="floating_service_notification_title">Universal Find Active</string>
+    <string name="floating_service_notification_text">Tap the floating widget on screen to search anything.</string>
+</resources>
