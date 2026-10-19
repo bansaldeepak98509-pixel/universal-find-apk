@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -8,44 +7,42 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,7 +96,6 @@ fun DocumentViewerScreen(
     var isLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    // System File Pickers
     val textPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -136,7 +132,12 @@ fun DocumentViewerScreen(
                     searchResult = documentManager.searchDocument(doc, searchQuery)
                     statusMessage = null
                 } catch (e: Exception) {
-                    statusMessage = "Error OCRing image: ${e.message}"
+                    val msg = e.message ?: "Unknown error"
+                    statusMessage = if (msg.contains("download", ignoreCase = true)) {
+                        "OCR model is downloading in background. Please wait a moment and try again."
+                    } else {
+                        "Error OCRing image: $msg"
+                    }
                 } finally {
                     isLoading = false
                 }
@@ -158,7 +159,12 @@ fun DocumentViewerScreen(
                     searchResult = documentManager.searchDocument(doc, searchQuery)
                     statusMessage = null
                 } catch (e: Exception) {
-                    statusMessage = "Error rendering PDF: ${e.message}"
+                    val msg = e.message ?: "Unknown error"
+                    statusMessage = if (msg.contains("download", ignoreCase = true)) {
+                        "OCR model is downloading in background. Please wait a moment and try again."
+                    } else {
+                        "Error parsing PDF: $msg"
+                    }
                 } finally {
                     isLoading = false
                 }
@@ -166,317 +172,201 @@ fun DocumentViewerScreen(
         }
     }
 
-    // Refresh search results when query or document changes
-    fun performSearch(query: SearchQuery, activeIdx: Int = 0) {
-        searchQuery = query
-        searchResult = documentManager.searchDocument(currentDocument, query, activeIdx)
-        // Auto-switch to active match's page if multi-page
-        searchResult.activeMatch?.let { match ->
-            val pageIdx = (match.page - 1).coerceIn(0, currentDocument.pages.size - 1)
-            if (pageIdx != selectedPageIndex) {
-                selectedPageIndex = pageIdx
-            }
+    LaunchedEffect(searchQuery, currentDocument) {
+        searchResult = documentManager.searchDocument(currentDocument, searchQuery)
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            ChromeFindBar(
+                query = searchQuery,
+                searchResult = searchResult,
+                onQueryChange = { newQ -> searchQuery = newQ },
+                onNextMatch = {
+                    if (searchResult.totalMatches > 0) {
+                        val next = (searchResult.activeIndex + 1) % searchResult.totalMatches
+                        searchResult = searchResult.copy(activeIndex = next)
+                    }
+                },
+                onPreviousMatch = {
+                    if (searchResult.totalMatches > 0) {
+                        val prev = if (searchResult.activeIndex <= 0) searchResult.totalMatches - 1 else searchResult.activeIndex - 1
+                        searchResult = searchResult.copy(activeIndex = prev)
+                    }
+                },
+                onClose = {
+                    searchQuery = searchQuery.copy(text = "")
+                }
+            )
         }
-    }
-
-    // Auto-search on initial load or sample change
-    LaunchedEffect(currentDocument) {
-        performSearch(searchQuery)
-    }
-
-    val textScrollState = rememberScrollState()
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        // Chrome-style Find Bar docked at top
-        ChromeFindBar(
-            query = searchQuery,
-            searchResult = searchResult,
-            onQueryChanged = { text ->
-                performSearch(searchQuery.copy(text = text))
-            },
-            onMatchCaseToggled = { matchCase ->
-                performSearch(searchQuery.copy(matchCase = matchCase))
-            },
-            onWholeWordToggled = { wholeWord ->
-                performSearch(searchQuery.copy(wholeWord = wholeWord))
-            },
-            onRegexToggled = { regex ->
-                performSearch(searchQuery.copy(useRegex = regex))
-            },
-            onPreviousMatch = {
-                val nextActive = if (searchResult.activeIndex <= 0) {
-                    searchResult.matches.size - 1
-                } else {
-                    searchResult.activeIndex - 1
-                }
-                performSearch(searchQuery, nextActive)
-            },
-            onNextMatch = {
-                val nextActive = if (searchResult.matches.isNotEmpty()) {
-                    (searchResult.activeIndex + 1) % searchResult.matches.size
-                } else {
-                    -1
-                }
-                performSearch(searchQuery, nextActive)
-            },
-            onClose = {
-                performSearch(searchQuery.copy(text = ""))
-            }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Document Source Picker Row (Sample presets & File Import buttons)
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
         ) {
-            item {
-                AssistChip(
+            // Document Selection & Import Strip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Sample 1: Web Article
+                SampleChip(
+                    label = "Web Article",
+                    isSelected = currentDocument.title.contains("Web Article"),
                     onClick = {
                         currentDocument = documentManager.getSampleDocument(SampleDocType.WEB_ARTICLE)
                         selectedPageIndex = 0
-                    },
-                    label = { Text("Web Article") },
-                    leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, Modifier.size(16.dp)) }
+                    }
                 )
-            }
-            item {
-                AssistChip(
+                // Sample 2: Multilingual Hindi
+                SampleChip(
+                    label = "Hindi & Devanagari",
+                    isSelected = currentDocument.title.contains("Multilingual"),
                     onClick = {
                         currentDocument = documentManager.getSampleDocument(SampleDocType.MULTILINGUAL_INDIAN_SCRIPTS)
                         selectedPageIndex = 0
-                    },
-                    label = { Text("Hindi / Devanagari") },
-                    leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, Modifier.size(16.dp)) }
+                    }
                 )
-            }
-            item {
-                AssistChip(
+                // Sample 3: Technical Spec
+                SampleChip(
+                    label = "System Spec",
+                    isSelected = currentDocument.title.contains("Spec"),
                     onClick = {
                         currentDocument = documentManager.getSampleDocument(SampleDocType.TECHNICAL_SPEC)
                         selectedPageIndex = 0
-                    },
-                    label = { Text("Tech Spec") },
-                    leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, Modifier.size(16.dp)) }
+                    }
                 )
-            }
-            item {
-                AssistChip(
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Import Actions
+                OutlinedButton(
                     onClick = { textPickerLauncher.launch("text/plain") },
-                    label = { Text("Import TXT") },
-                    leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null, Modifier.size(16.dp)) }
-                )
-            }
-            item {
-                AssistChip(
-                    onClick = { pdfPickerLauncher.launch("application/pdf") },
-                    label = { Text("Import PDF") },
-                    leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, Modifier.size(16.dp)) }
-                )
-            }
-            item {
-                AssistChip(
+                    modifier = Modifier.testTag("import_txt_button")
+                ) {
+                    Text("+ Text")
+                }
+                OutlinedButton(
                     onClick = { imagePickerLauncher.launch("image/*") },
-                    label = { Text("Import Image") },
-                    leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, Modifier.size(16.dp)) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Multi-page selector if document has multiple pages
-        if (currentDocument.pages.size > 1) {
-            ScrollableTabRow(
-                selectedTabIndex = selectedPageIndex,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                edgePadding = 0.dp
-            ) {
-                currentDocument.pages.forEachIndexed { idx, _ ->
-                    Tab(
-                        selected = selectedPageIndex == idx,
-                        onClick = { selectedPageIndex = idx },
-                        text = { Text("Page ${idx + 1}") }
-                    )
+                    modifier = Modifier.testTag("import_img_button")
+                ) {
+                    Text("+ Image")
+                }
+                OutlinedButton(
+                    onClick = { pdfPickerLauncher.launch("application/pdf") },
+                    modifier = Modifier.testTag("import_pdf_button")
+                ) {
+                    Text("+ PDF")
                 }
             }
-        }
 
-        // Active Document Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = currentDocument.title,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (searchResult.totalMatches > 0) {
-                Text(
-                    text = "${searchResult.totalMatches} matches found",
-                    fontSize = 12.sp,
-                    color = SearchAmberAccent,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Document Viewer Canvas / Text Area
-        Card(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp)
-            ) {
-                if (isLoading) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = statusMessage ?: "Processing document…",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(statusMessage ?: "Loading…", style = MaterialTheme.typography.bodyMedium)
                     }
-                } else {
-                    val activePage = currentDocument.pages.getOrNull(selectedPageIndex)
-                        ?: currentDocument.pages.firstOrNull()
+                }
+            }
 
-                    if (activePage?.previewBitmap != null) {
-                        // Image or PDF Render with Canvas Highlight Overlay
-                        val bitmap = activePage.previewBitmap
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
+            // Document Viewport
+            val activePage = currentDocument.pages.getOrNull(selectedPageIndex) ?: currentDocument.pages.firstOrNull()
+
+            if (activePage != null) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                ) {
+                    if (activePage.previewBitmap != null) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Document page ${activePage.pageNumber}",
+                                bitmap = activePage.previewBitmap.asImageBitmap(),
+                                contentDescription = "Scanned Page Document",
                                 modifier = Modifier.fillMaxSize()
                             )
-
-                            // Render Chrome-style Highlight Overlays and vertical tick marks
-                            val pageMatches = searchResult.matches.filter { it.page == activePage.pageNumber }
-                            val pageSearchResult = searchResult.copy(matches = pageMatches)
-
                             HighlightOverlayView(
-                                searchResult = pageSearchResult,
-                                sourceWidth = bitmap.width.toFloat(),
-                                sourceHeight = bitmap.height.toFloat(),
-                                modifier = Modifier.fillMaxSize()
+                                searchResult = searchResult,
+                                sourceWidth = activePage.previewBitmap.width.toFloat(),
+                                sourceHeight = activePage.previewBitmap.height.toFloat()
                             )
                         }
-                    } else if (activePage != null) {
-                        // Plain Text Viewer with formatted highlights
-                        val rawText = activePage.text
-                        val annotatedText = buildAnnotatedStringWithHighlights(
-                            text = rawText,
-                            query = searchQuery,
-                            searchResult = searchResult,
-                            activePage = activePage.pageNumber
-                        )
+                    } else {
+                        // Plain Text Document View with Inline Highlights
+                        val scrollState = rememberScrollState()
+                        val annotatedText = buildAnnotatedDocText(activePage.text, searchResult)
 
-                        Text(
-                            text = annotatedText,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                lineHeight = 22.sp,
-                                fontSize = 14.sp
-                            ),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(textScrollState)
-                                .testTag("document_text_view")
-                        )
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Text(
+                                text = annotatedText,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    lineHeight = 26.sp,
+                                    fontFamily = FontFamily.Default
+                                ),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp)
+                                    .verticalScroll(scrollState)
+                                    .testTag("plain_text_viewport")
+                            )
+
+                            // Document mini-map tick indicators on right
+                            HighlightOverlayView(
+                                searchResult = searchResult,
+                                sourceWidth = 1000f,
+                                sourceHeight = (activePage.text.length * 1.8f).coerceAtLeast(1000f)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Bottom Match Snippets Carousel (Instant tap to jump to any match)
-        if (searchResult.totalMatches > 0) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val listState = rememberLazyListState()
-
-            LaunchedEffect(searchResult.activeIndex) {
-                if (searchResult.activeIndex in searchResult.matches.indices) {
-                    listState.animateScrollToItem(searchResult.activeIndex)
-                }
-            }
-
-            LazyRow(
-                state = listState,
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(searchResult.matches) { index, match ->
-                    val isActive = index == searchResult.activeIndex
-                    Card(
+            // Multi-Page Pagination Bar if Document has multiple pages
+            if (currentDocument.pages.size > 1) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    tonalElevation = 2.dp
+                ) {
+                    Row(
                         modifier = Modifier
-                            .width(220.dp)
-                            .clickable {
-                                performSearch(searchQuery, index)
-                            },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isActive)
-                                HighlightActiveColor.copy(alpha = 0.2f)
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = if (isActive)
-                            CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(HighlightActiveBorder))
-                        else null
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "#${index + 1} (Page ${match.page})",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = if (isActive) HighlightActiveBorder else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = match.matchedText,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = match.snippet,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2
-                            )
+                        IconButton(
+                            onClick = { if (selectedPageIndex > 0) selectedPageIndex-- },
+                            enabled = selectedPageIndex > 0
+                        ) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Previous Page")
+                        }
+
+                        Text(
+                            text = "Page ${selectedPageIndex + 1} of ${currentDocument.pages.size}",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+
+                        IconButton(
+                            onClick = { if (selectedPageIndex < currentDocument.pages.size - 1) selectedPageIndex++ },
+                            enabled = selectedPageIndex < currentDocument.pages.size - 1
+                        ) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = "Next Page")
                         }
                     }
                 }
@@ -485,41 +375,61 @@ fun DocumentViewerScreen(
     }
 }
 
-private fun buildAnnotatedStringWithHighlights(
-    text: String,
-    query: SearchQuery,
-    searchResult: SearchResult,
-    activePage: Int
-): AnnotatedString {
-    if (query.isEmpty || searchResult.matches.isEmpty()) {
-        return AnnotatedString(text)
+@Composable
+private fun SampleChip(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        border = if (isSelected) ButtonDefaults.outlinedButtonBorder else null
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun buildAnnotatedDocText(source: String, searchResult: SearchResult): AnnotatedString {
+    if (searchResult.matches.isEmpty()) {
+        return AnnotatedString(source)
     }
 
-    val builder = AnnotatedString.Builder(text)
-    val pageMatches = searchResult.matches.filter { it.page == activePage }
-
-    for ((index, match) in pageMatches.withIndex()) {
-        val s = match.start.coerceIn(0, text.length)
-        val e = match.end.coerceIn(0, text.length)
-        if (s >= e) continue
-
-        val isCurrentActive = (searchResult.activeIndex >= 0 &&
-                searchResult.activeIndex < searchResult.matches.size &&
-                searchResult.matches[searchResult.activeIndex].id == match.id)
-
-        val bg = if (isCurrentActive) HighlightActiveColor else HighlightInactiveColor
-        val textColor = androidx.compose.ui.graphics.Color(0xFF0F172A)
-
-        builder.addStyle(
-            style = SpanStyle(
-                background = bg,
-                color = textColor,
-                fontWeight = if (isCurrentActive) FontWeight.ExtraBold else FontWeight.Medium
-            ),
-            start = s,
-            end = e
-        )
+    return buildAnnotatedString {
+        append(source)
+        for ((idx, match) in searchResult.matches.withIndex()) {
+            val isCurrent = (idx == searchResult.activeIndex)
+            val start = match.start.coerceIn(0, source.length)
+            val end = match.end.coerceIn(0, source.length)
+            if (start < end) {
+                addStyle(
+                    style = SpanStyle(
+                        background = if (isCurrent) HighlightActiveColor else HighlightInactiveColor,
+                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                    ),
+                    start = start,
+                    end = end
+                )
+            }
+        }
     }
-
-    return builder.toAnnotatedString()
 }

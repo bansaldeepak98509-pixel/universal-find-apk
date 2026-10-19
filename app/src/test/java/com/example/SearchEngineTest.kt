@@ -75,7 +75,6 @@ class SearchEngineTest {
         assertEquals(2, result.totalMatches)
         assertEquals(0, result.activeIndex)
 
-        // Wraps back to last match
         result = searchEngine.previousMatch(result)
         assertEquals(1, result.activeIndex)
 
@@ -91,7 +90,6 @@ class SearchEngineTest {
         assertEquals("in", wholeWordResult.matches[0].matchedText)
 
         val partialResult = searchEngine.search(text, SearchQuery("in", wholeWord = false))
-        // "in" appears in "in", "inside"
         assertTrue(partialResult.totalMatches >= 2)
     }
 
@@ -115,7 +113,6 @@ class SearchEngineTest {
         assertEquals("Section 202", result.matches[1].matchedText)
         assertEquals("Section 303", result.matches[2].matchedText)
 
-        // Malformed regex
         val invalidResult = searchEngine.search(text, SearchQuery("[unclosed", useRegex = true))
         assertEquals(0, invalidResult.totalMatches)
         assertNotNull(invalidResult.errorMessage)
@@ -125,13 +122,11 @@ class SearchEngineTest {
     @Test
     fun `repeated and overlapping matches are captured accurately`() {
         val text = "banana aaa"
-        // "ana" in "banana" at index 1 and 3
         val anaResult = searchEngine.search(text, SearchQuery("ana"))
         assertEquals(2, anaResult.totalMatches)
         assertEquals(1, anaResult.matches[0].start)
         assertEquals(3, anaResult.matches[1].start)
 
-        // "aa" in "aaa" (overlapping at 7 and 8)
         val aaResult = searchEngine.search(text, SearchQuery("aa"))
         assertEquals(2, aaResult.totalMatches)
         assertEquals(7, aaResult.matches[0].start)
@@ -141,17 +136,14 @@ class SearchEngineTest {
     @Test
     fun `whitespace query and missing target match boundaries`() {
         val text = "Quick brown fox"
-        // Whitespace only
         val blankResult = searchEngine.search(text, SearchQuery("   "))
         assertEquals(0, blankResult.totalMatches)
         assertEquals("", blankResult.displayCounter)
 
-        // Missing target
         val missingResult = searchEngine.search(text, SearchQuery("zebra"))
         assertEquals(0, missingResult.totalMatches)
         assertEquals("0/0", missingResult.displayCounter)
 
-        // Single match
         val singleResult = searchEngine.search(text, SearchQuery("fox"))
         assertEquals(1, singleResult.totalMatches)
         assertEquals("1/1", singleResult.displayCounter)
@@ -175,12 +167,10 @@ class SearchEngineTest {
     @Test
     fun `hindi whole word distinguishes inflected compounds`() {
         val text = "यह एक अच्छी खोज है लेकिन खोजकर्ता व्यस्त है।"
-        // "खोज" as a whole word should match the standalone word, but NOT "खोजकर्ता"
         val wholeWordResult = searchEngine.search(text, SearchQuery("खोज", wholeWord = true))
         assertEquals(1, wholeWordResult.totalMatches)
         assertEquals("खोज", wholeWordResult.matches[0].matchedText)
 
-        // "खोज" as partial should match both
         val partialResult = searchEngine.search(text, SearchQuery("खोज", wholeWord = false))
         assertEquals(2, partialResult.totalMatches)
     }

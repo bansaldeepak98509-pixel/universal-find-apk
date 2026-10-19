@@ -1,15 +1,18 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,21 +24,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,337 +53,294 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.example.accessibility.UniversalFindAccessibilityService
 import com.example.capture.ScreenCaptureManager
 import com.example.ocr.OcrResult
 import com.example.ocr.OcrTextProvider
 import com.example.search.SearchQuery
 import com.example.search.SearchResult
+import com.example.service.FloatingSearchService
 import com.example.ui.components.ChromeFindBar
 import com.example.ui.components.HighlightOverlayView
-import com.example.ui.theme.ElectricBluePrimary
-import com.example.ui.theme.SearchAmberAccent
+import com.example.ui.theme.GoogleBlue
 import kotlinx.coroutines.launch
 
 @Composable
 fun ScreenSearchScreen(
-    captureManager: ScreenCaptureManager,
     ocrProvider: OcrTextProvider,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val captureManager = remember { ScreenCaptureManager(context) }
 
     var searchQuery by remember { mutableStateOf(SearchQuery(text = "")) }
-    var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var currentOcrResult by remember { mutableStateOf<OcrResult?>(null) }
+    var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var ocrResult by remember { mutableStateOf<OcrResult?>(null) }
     var searchResult by remember { mutableStateOf(SearchResult(query = searchQuery)) }
-    var isProcessing by remember { mutableStateOf(false) }
+
+    var isCapturing by remember { mutableStateOf(false) }
+    var isFloatingActive by remember { mutableStateOf(FloatingSearchService.isServiceRunning) }
     var statusText by remember { mutableStateOf<String?>(null) }
 
-    // MediaProjection Consent Intent Launcher
     val projectionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             coroutineScope.launch {
-                isProcessing = true
-                statusText = "Capturing screen via MediaProjection…"
-                try {
-                    captureManager.startProjection(result.resultCode, result.data!!)
-                    val bitmap = captureManager.captureScreen()
-                    if (bitmap != null) {
-                        currentBitmap = bitmap
-                        statusText = "Analyzing text with on-device ML Kit…"
+                isCapturing = true
+                statusText = "Capturing screen buffer…"
+                val bitmap = captureManager.captureScreen(result.resultCode, result.data!!)
+                if (bitmap != null) {
+                    capturedBitmap = bitmap
+                    statusText = "Running on-device ML Kit OCR…"
+                    try {
                         val ocr = ocrProvider.recognizeText(bitmap)
-                        currentOcrResult = ocr
+                        ocrResult = ocr
                         searchResult = ocrProvider.findMatchesInOcr(ocr, searchQuery)
                         statusText = null
-                    } else {
-                        statusText = "Unable to read frame (FLAG_SECURE or surface timeout)."
+                    } catch (e: Exception) {
+                        val msg = e.message ?: "OCR error"
+                        statusText = if (msg.contains("download", ignoreCase = true)) {
+                            "OCR model is downloading in background. Please wait a moment and try again."
+                        } else {
+                            "OCR error: $msg"
+                        }
                     }
-                } catch (e: Exception) {
-                    statusText = "Capture failed: ${e.message}"
-                } finally {
-                    isProcessing = false
+                } else {
+                    statusText = "Screen capture failed"
                 }
+                isCapturing = false
             }
         } else {
-            statusText = "Screen capture permission declined by user."
+            statusText = "Screen capture permission declined"
         }
     }
 
-    fun triggerSearch(query: SearchQuery, activeIdx: Int = 0) {
-        searchQuery = query
-        val ocr = currentOcrResult
+    LaunchedEffect(searchQuery, ocrResult) {
+        val ocr = ocrResult
         if (ocr != null) {
-            searchResult = ocrProvider.findMatchesInOcr(ocr, query, activeIdx)
-        }
-    }
-
-    // Load initial simulated screen if no capture has been run yet
-    LaunchedEffect(Unit) {
-        if (currentBitmap == null) {
-            val sampleBmp = generateSimulatedScreenBitmap()
-            currentBitmap = sampleBmp
-            val ocr = ocrProvider.recognizeText(sampleBmp)
-            currentOcrResult = ocr
             searchResult = ocrProvider.findMatchesInOcr(ocr, searchQuery)
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
-    ) {
-        // Find Bar
-        ChromeFindBar(
-            query = searchQuery,
-            searchResult = searchResult,
-            onQueryChanged = { text ->
-                triggerSearch(searchQuery.copy(text = text))
-            },
-            onMatchCaseToggled = { matchCase ->
-                triggerSearch(searchQuery.copy(matchCase = matchCase))
-            },
-            onWholeWordToggled = { wholeWord ->
-                triggerSearch(searchQuery.copy(wholeWord = wholeWord))
-            },
-            onRegexToggled = { regex ->
-                triggerSearch(searchQuery.copy(useRegex = regex))
-            },
-            onPreviousMatch = {
-                val nextActive = if (searchResult.activeIndex <= 0) {
-                    searchResult.matches.size - 1
-                } else {
-                    searchResult.activeIndex - 1
-                }
-                triggerSearch(searchQuery, nextActive)
-            },
-            onNextMatch = {
-                val nextActive = if (searchResult.matches.isNotEmpty()) {
-                    (searchResult.activeIndex + 1) % searchResult.matches.size
-                } else {
-                    -1
-                }
-                triggerSearch(searchQuery, nextActive)
-            },
-            onClose = {
-                triggerSearch(searchQuery.copy(text = ""))
-            }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Action Buttons Row: MediaProjection Capture & Screen Simulator
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = {
-                    val intent = captureManager.createScreenCaptureIntent()
-                    if (intent != null) {
-                        projectionLauncher.launch(intent)
-                    } else {
-                        statusText = "MediaProjection is not supported on this device/emulator."
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            ChromeFindBar(
+                query = searchQuery,
+                searchResult = searchResult,
+                onQueryChange = { newQ -> searchQuery = newQ },
+                onNextMatch = {
+                    if (searchResult.totalMatches > 0) {
+                        val next = (searchResult.activeIndex + 1) % searchResult.totalMatches
+                        searchResult = searchResult.copy(activeIndex = next)
                     }
                 },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("capture_screen_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricBluePrimary)
-            ) {
-                Icon(Icons.Default.Cast, contentDescription = null, Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Capture Screen", fontSize = 12.sp)
-            }
-
-            OutlinedButton(
-                onClick = {
-                    coroutineScope.launch {
-                        isProcessing = true
-                        statusText = "Rendering simulated screen & analyzing…"
-                        val sampleBmp = generateSimulatedScreenBitmap()
-                        currentBitmap = sampleBmp
-                        val ocr = ocrProvider.recognizeText(sampleBmp)
-                        currentOcrResult = ocr
-                        searchResult = ocrProvider.findMatchesInOcr(ocr, searchQuery)
-                        isProcessing = false
-                        statusText = null
+                onPreviousMatch = {
+                    if (searchResult.totalMatches > 0) {
+                        val prev = if (searchResult.activeIndex <= 0) searchResult.totalMatches - 1 else searchResult.activeIndex - 1
+                        searchResult = searchResult.copy(activeIndex = prev)
                     }
                 },
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.Visibility, contentDescription = null, Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Simulated App", fontSize = 12.sp)
-            }
-        }
-
-        if (statusText != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = statusText!!,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 4.dp)
+                onClose = {
+                    searchQuery = searchQuery.copy(text = "")
+                }
             )
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Screen Preview Area with Interactive Highlights
-        Card(
+    ) { innerPadding ->
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Box(
+            // Live Floating Bubble Control Card
+            ElevatedCard(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .testTag("floating_control_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             ) {
-                if (isProcessing) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = ElectricBluePrimary)
-                        Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = statusText ?: "Processing screen capture…",
-                            fontSize = 13.sp,
+                            text = "Universal Floating Widget",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Float a Chrome-style search bubble over WhatsApp, Instagram, PDFs, or any Android app.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                } else if (currentBitmap != null) {
-                    val bmp = currentBitmap!!
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "Screen Capture",
-                            modifier = Modifier.fillMaxSize()
-                        )
-
-                        HighlightOverlayView(
-                            searchResult = searchResult,
-                            sourceWidth = bmp.width.toFloat(),
-                            sourceHeight = bmp.height.toFloat(),
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "No screen capture available. Tap 'Capture Screen' above.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp
+                    Switch(
+                        checked = isFloatingActive,
+                        onCheckedChange = { enable ->
+                            if (enable) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } else {
+                                    val serviceIntent = Intent(context, FloatingSearchService::class.java).apply {
+                                        action = FloatingSearchService.ACTION_START
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        context.startForegroundService(serviceIntent)
+                                    } else {
+                                        context.startService(serviceIntent)
+                                    }
+                                    isFloatingActive = true
+                                }
+                            } else {
+                                val serviceIntent = Intent(context, FloatingSearchService::class.java).apply {
+                                    action = FloatingSearchService.ACTION_STOP
+                                }
+                                context.stopService(serviceIntent)
+                                isFloatingActive = false
+                            }
+                        },
+                        modifier = Modifier.testTag("floating_bubble_switch")
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Screen Capture Action Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val intent = captureManager.createScreenCaptureIntent()
+                        projectionLauncher.launch(intent)
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("capture_screen_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = GoogleBlue)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Capture & OCR Screen")
+                }
+
+                if (capturedBitmap != null) {
+                    OutlinedButton(
+                        onClick = {
+                            capturedBitmap = null
+                            ocrResult = null
+                            searchResult = SearchResult(query = searchQuery)
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Clear")
+                    }
+                }
+            }
+
+            if (isCapturing || statusText != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isCapturing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                    }
+                    Text(
+                        text = statusText ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Screen Capture Frame Display with Overlay
+            val bitmap = capturedBitmap
+            if (bitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(420.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                ) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Screen Capture Preview",
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    HighlightOverlayView(
+                        searchResult = searchResult,
+                        sourceWidth = bitmap.width.toFloat(),
+                        sourceHeight = bitmap.height.toFloat()
+                    )
+                }
+            } else {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = GoogleBlue,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Find Anything on Screen",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Tap 'Capture & OCR Screen' to snapshot the active display and search text in any messaging, reading, or video app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
-
-        // Privacy indicator badge
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Security,
-                contentDescription = "Security",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "100% On-Device OCR. Screenshots are never saved or uploaded.",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
-}
-
-/**
- * Creates a clean simulated Android screen with rich text for instant testing.
- */
-private fun generateSimulatedScreenBitmap(): Bitmap {
-    val width = 1080
-    val height = 1920
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    // Dark slate background
-    canvas.drawColor(Color.parseColor("#0F172A"))
-
-    // Header bar
-    val headerPaint = Paint().apply {
-        color = Color.parseColor("#1E293B")
-        style = Paint.Style.FILL
-    }
-    canvas.drawRect(0f, 0f, width.toFloat(), 180f, headerPaint)
-
-    val titlePaint = Paint().apply {
-        color = Color.WHITE
-        textSize = 54f
-        isAntiAlias = true
-        isFakeBoldText = true
-    }
-    canvas.drawText("App Feed & Settings", 60f, 110f, titlePaint)
-
-    // Card 1
-    val cardPaint = Paint().apply {
-        color = Color.parseColor("#1E293B")
-        style = Paint.Style.FILL
-    }
-    canvas.drawRoundRect(40f, 220f, (width - 40).toFloat(), 600f, 24f, 24f, cardPaint)
-
-    val textPaint = Paint().apply {
-        color = Color.parseColor("#F8FAFC")
-        textSize = 42f
-        isAntiAlias = true
-    }
-    val highlightColor = Color.parseColor("#38BDF8")
-    val subPaint = Paint().apply {
-        color = highlightColor
-        textSize = 34f
-        isAntiAlias = true
-        isFakeBoldText = true
-    }
-
-    canvas.drawText("Chrome Find in Page Features", 80f, 300f, subPaint)
-    canvas.drawText("Universal Find brings Find on page to Android apps.", 80f, 380f, textPaint)
-    canvas.drawText("Search through on-screen text instantly.", 80f, 450f, textPaint)
-    canvas.drawText("Works with Latin, Numbers, and Devanagari text.", 80f, 520f, textPaint)
-
-    // Card 2
-    canvas.drawRoundRect(40f, 640f, (width - 40).toFloat(), 1100f, 24f, 24f, cardPaint)
-    canvas.drawText("Security & On-Device Processing", 80f, 720f, subPaint)
-    canvas.drawText("1. MediaProjection with explicit user consent", 80f, 800f, textPaint)
-    canvas.drawText("2. On-device Google ML Kit Vision text recognizer", 80f, 870f, textPaint)
-    canvas.drawText("3. Zero data telemetry or cloud uploads", 80f, 940f, textPaint)
-    canvas.drawText("4. Respects FLAG_SECURE window restrictions", 80f, 1010f, textPaint)
-
-    // Card 3
-    canvas.drawRoundRect(40f, 1140f, (width - 40).toFloat(), 1600f, 24f, 24f, cardPaint)
-    canvas.drawText("Devanagari Test / भारतीय भाषा परीक्षण", 80f, 1220f, subPaint)
-    canvas.drawText("भारत एक विशाल और प्रगतिशील देश है।", 80f, 1300f, textPaint)
-    canvas.drawText("यूनिवर्सल फाइंड से आप किसी भी शब्द को खोज सकते हैं।", 80f, 1370f, textPaint)
-    canvas.drawText("खोज (Search) तकनीक हर जगह काम करती है।", 80f, 1440f, textPaint)
-    canvas.drawText("Chrome Find style navigation with next and prev.", 80f, 1510f, textPaint)
-
-    return bitmap
 }

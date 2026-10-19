@@ -1,10 +1,11 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,22 +22,21 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,248 +48,219 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.search.SearchQuery
 import com.example.search.SearchResult
-import com.example.ui.theme.SearchAmberAccent
+import com.example.ui.theme.GoogleBlue
+import com.example.ui.theme.GoogleTextPrimary
+import com.example.ui.theme.GoogleTextSecondary
+import com.example.ui.theme.SearchCountBg
 
 @Composable
 fun ChromeFindBar(
     query: SearchQuery,
     searchResult: SearchResult,
-    onQueryChanged: (String) -> Unit,
-    onMatchCaseToggled: (Boolean) -> Unit,
-    onWholeWordToggled: (Boolean) -> Unit,
-    onRegexToggled: (Boolean) -> Unit,
-    onPreviousMatch: () -> Unit,
+    onQueryChange: (SearchQuery) -> Unit,
     onNextMatch: () -> Unit,
+    onPreviousMatch: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showAdvancedFilters by remember { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(28.dp))
             .testTag("chrome_find_bar"),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface,
         tonalElevation = 6.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
+        Column {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Search Icon
+                // Search Magnifier Icon
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier
-                        .size(20.dp)
-                        .padding(end = 4.dp)
+                    tint = GoogleBlue,
+                    modifier = Modifier.padding(start = 8.dp, end = 6.dp)
                 )
 
-                // Query Input
+                // Editable Search Input Field
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(38.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (searchResult.totalMatches > 0) SearchAmberAccent else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 10.dp),
+                        .padding(vertical = 4.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (query.text.isEmpty()) {
                         Text(
                             text = "Find in page…",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            fontSize = 14.sp
+                            style = TextStyle(
+                                color = GoogleTextSecondary.copy(alpha = 0.7f),
+                                fontSize = 16.sp
+                            )
                         )
                     }
-
                     BasicTextField(
                         value = query.text,
-                        onValueChange = onQueryChanged,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 14.sp
+                        onValueChange = { newText ->
+                            onQueryChange(query.copy(text = newText))
+                        },
+                        textStyle = TextStyle(
+                            color = GoogleTextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Normal
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        singleLine = true,
+                        cursorBrush = SolidColor(GoogleBlue),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onNextMatch() }),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("find_input")
+                            .testTag("search_text_input")
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // Match Counter Badge (Chrome Style e.g. "3/12" or "0/0")
-                if (query.text.isNotEmpty()) {
+                // Match Counter Badge (e.g. "3/14", "0/0", or "Error")
+                if (searchResult.displayCounter.isNotEmpty()) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .padding(horizontal = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (searchResult.totalMatches > 0)
-                                    SearchAmberAccent.copy(alpha = 0.2f)
-                                else
-                                    MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+                                if (searchResult.errorMessage != null) Color(0xFFFFEBEE)
+                                else SearchCountBg
                             )
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                            .testTag("match_counter"),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("match_counter_badge")
                     ) {
                         Text(
                             text = searchResult.displayCounter,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = if (searchResult.totalMatches > 0)
-                                MaterialTheme.colorScheme.onSurface
-                            else
-                                MaterialTheme.colorScheme.error
+                            style = TextStyle(
+                                color = if (searchResult.errorMessage != null) Color(0xFFC62828)
+                                else if (searchResult.totalMatches > 0) GoogleBlue
+                                else GoogleTextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(4.dp))
                 }
 
-                // Previous match button
+                // Previous Match Button
                 IconButton(
                     onClick = onPreviousMatch,
                     enabled = searchResult.totalMatches > 0,
                     modifier = Modifier
-                        .size(36.dp)
-                        .testTag("prev_button")
+                        .size(40.dp)
+                        .testTag("prev_match_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Previous match",
-                        tint = if (searchResult.totalMatches > 0)
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        contentDescription = "Previous Match",
+                        tint = if (searchResult.totalMatches > 0) GoogleTextPrimary else GoogleTextSecondary.copy(alpha = 0.4f)
                     )
                 }
 
-                // Next match button
+                // Next Match Button
                 IconButton(
                     onClick = onNextMatch,
                     enabled = searchResult.totalMatches > 0,
                     modifier = Modifier
-                        .size(36.dp)
-                        .testTag("next_button")
+                        .size(40.dp)
+                        .testTag("next_match_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Next match",
-                        tint = if (searchResult.totalMatches > 0)
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        contentDescription = "Next Match",
+                        tint = if (searchResult.totalMatches > 0) GoogleTextPrimary else GoogleTextSecondary.copy(alpha = 0.4f)
                     )
                 }
 
-                // Close / Dismiss button
+                // 3-Dots Menu for Match Case, Whole Word, Regex
+                Box {
+                    IconButton(
+                        onClick = { showOptionsMenu = !showOptionsMenu },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("find_options_menu_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Search Options",
+                            tint = if (query.matchCase || query.wholeWord || query.useRegex) GoogleBlue else GoogleTextSecondary
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showOptionsMenu,
+                        onDismissRequest = { showOptionsMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (query.matchCase) "✓ Match Case (Aa)" else "  Match Case (Aa)")
+                            },
+                            onClick = {
+                                onQueryChange(query.copy(matchCase = !query.matchCase))
+                                showOptionsMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (query.wholeWord) "✓ Match Whole Word" else "  Match Whole Word")
+                            },
+                            onClick = {
+                                onQueryChange(query.copy(wholeWord = !query.wholeWord))
+                                showOptionsMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (query.useRegex) "✓ Regular Expression (.*)" else "  Regular Expression (.*)")
+                            },
+                            onClick = {
+                                onQueryChange(query.copy(useRegex = !query.useRegex))
+                                showOptionsMenu = false
+                            }
+                        )
+                    }
+                }
+
+                // Dismiss / Close Button
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
                         .size(36.dp)
-                        .testTag("close_button")
+                        .testTag("close_find_bar_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Close search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        contentDescription = "Close Find Bar",
+                        tint = GoogleTextSecondary
                     )
                 }
             }
 
-            // Options Bar (Case Sensitivity, Whole Word, Regex)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Match Case Toggle [Aa]
-                FilterChip(
-                    selected = query.matchCase,
-                    onClick = { onMatchCaseToggled(!query.matchCase) },
-                    label = {
-                        Text(
-                            text = "Aa",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    },
-                    modifier = Modifier
-                        .height(28.dp)
-                        .testTag("match_case_toggle")
+            // Optional Regex Error Note
+            if (searchResult.errorMessage != null) {
+                Text(
+                    text = "Regex: ${searchResult.errorMessage}",
+                    style = TextStyle(color = Color(0xFFC62828), fontSize = 11.sp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
-
-                // Whole Word Toggle
-                FilterChip(
-                    selected = query.wholeWord,
-                    onClick = { onWholeWordToggled(!query.wholeWord) },
-                    label = {
-                        Text(
-                            text = "\"Word\"",
-                            fontSize = 11.sp
-                        )
-                    },
-                    modifier = Modifier
-                        .height(28.dp)
-                        .testTag("whole_word_toggle")
-                )
-
-                // Regex Toggle [.*]
-                FilterChip(
-                    selected = query.useRegex,
-                    onClick = { onRegexToggled(!query.useRegex) },
-                    label = {
-                        Text(
-                            text = ".*",
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    },
-                    modifier = Modifier
-                        .height(28.dp)
-                        .testTag("regex_toggle")
-                )
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                if (searchResult.errorMessage != null) {
-                    Text(
-                        text = searchResult.errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp,
-                        maxLines = 1
-                    )
-                }
             }
         }
     }

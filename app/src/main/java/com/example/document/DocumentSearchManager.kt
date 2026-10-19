@@ -19,13 +19,12 @@ import java.io.InputStreamReader
 
 enum class DocumentType {
     PLAIN_TEXT,
-    PDF,
     IMAGE,
-    SCREEN_CAPTURE
+    PDF
 }
 
 data class DocumentPage(
-    val pageNumber: Int, // 1-indexed
+    val pageNumber: Int,
     val text: String,
     val previewBitmap: Bitmap? = null,
     val ocrResult: OcrResult? = null
@@ -40,9 +39,10 @@ data class LoadedDocument(
 
 class DocumentSearchManager(
     private val context: Context,
-    private val ocrProvider: OcrTextProvider = OcrTextProvider(),
+    private val ocrProvider: OcrTextProvider? = null,
     private val searchEngine: SearchEngine = SearchEngine()
 ) {
+    private val activeOcrProvider by lazy { ocrProvider ?: OcrTextProvider() }
 
     fun queryFileName(uri: Uri, fallback: String): String {
         var result = fallback
@@ -62,9 +62,6 @@ class DocumentSearchManager(
         return result
     }
 
-    /**
-     * Loads a plain text file from Uri.
-     */
     suspend fun loadTextFromUri(uri: Uri, fileName: String = ""): LoadedDocument =
         withContext(Dispatchers.IO) {
             val resolvedTitle = if (fileName.isNotBlank()) fileName else queryFileName(uri, "Imported Text.txt")
@@ -88,9 +85,6 @@ class DocumentSearchManager(
             )
         }
 
-    /**
-     * Loads and OCRs an image from Uri.
-     */
     suspend fun loadImageFromUri(uri: Uri, fileName: String = ""): LoadedDocument =
         withContext(Dispatchers.IO) {
             val resolvedTitle = if (fileName.isNotBlank()) fileName else queryFileName(uri, "Scanned Image.png")
@@ -99,7 +93,7 @@ class DocumentSearchManager(
                 BitmapFactory.decodeStream(stream)
             } ?: throw IllegalArgumentException("Could not decode image from URI")
 
-            val ocr = ocrProvider.recognizeText(bitmap)
+            val ocr = activeOcrProvider.recognizeText(bitmap)
             val page = DocumentPage(
                 pageNumber = 1,
                 text = ocr.rawText,
@@ -114,9 +108,6 @@ class DocumentSearchManager(
             )
         }
 
-    /**
-     * Loads and renders a PDF document, running OCR or extracting text from rendered pages.
-     */
     suspend fun loadPdfFromUri(
         uri: Uri,
         fileName: String = "",
@@ -135,46 +126,35 @@ class DocumentSearchManager(
                 val pageCount = minOf(renderer.pageCount, maxPages)
                 for (i in 0 until pageCount) {
                     val page = renderer.openPage(i)
-                    // Render page at readable resolution (2x standard density)
                     val width = page.width * 2
                     val height = page.height * 2
                     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     page.close()
 
-                    // OCR the rendered page bitmap
-                    val ocr = ocrProvider.recognizeText(bitmap)
-                    val pageText = ocr.rawText
-                    fullTextBuilder.append("--- Page ${i + 1} ---\n").append(pageText).append("\n\n")
-
+                    val ocr = activeOcrProvider.recognizeText(bitmap)
                     pages.add(
                         DocumentPage(
                             pageNumber = i + 1,
-                            text = pageText,
+                            text = ocr.rawText,
                             previewBitmap = bitmap,
                             ocrResult = ocr
                         )
                     )
+                    fullTextBuilder.append(ocr.rawText).append("\n--- Page Break ---\n")
                 }
             }
         }
 
         LoadedDocument(
-            title = fileName,
+            title = resolvedTitle,
             type = DocumentType.PDF,
             pages = pages,
             fullText = fullTextBuilder.toString()
         )
     }
 
-    /**
-     * Searches across all pages of a loaded document.
-     */
-    fun searchDocument(
-        document: LoadedDocument,
-        query: SearchQuery,
-        activeGlobalIndex: Int = 0
-    ): SearchResult {
+    fun searchDocument(document: LoadedDocument, query: SearchQuery): SearchResult {
         if (query.isEmpty) {
             return SearchResult(query = query, matches = emptyList(), activeIndex = -1)
         }
@@ -183,134 +163,88 @@ class DocumentSearchManager(
         var globalMatchId = 0
 
         for (page in document.pages) {
-            if (page.ocrResult != null) {
-                val pageSearchResult = ocrProvider.findMatchesInOcr(page.ocrResult, query)
-                for (match in pageSearchResult.matches) {
-                    allMatches.add(
-                        match.copy(
-                            id = globalMatchId++,
-                            page = page.pageNumber
-                        )
-                    )
-                }
+            val pageSearchResult = if (page.ocrResult != null) {
+                activeOcrProvider.findMatchesInOcr(page.ocrResult, query)
             } else {
-                val pageSearchResult = searchEngine.search(page.text, query)
-                for (match in pageSearchResult.matches) {
-                    allMatches.add(
-                        match.copy(
-                            id = globalMatchId++,
-                            page = page.pageNumber
-                        )
-                    )
-                }
+                searchEngine.search(page.text, query)
+            }
+
+            for (match in pageSearchResult.matches) {
+                allMatches.add(match.copy(id = globalMatchId++))
             }
         }
 
-        val resolvedIndex = when {
-            allMatches.isEmpty() -> -1
-            activeGlobalIndex in allMatches.indices -> activeGlobalIndex
-            else -> 0
-        }
-
+        val activeIdx = if (allMatches.isNotEmpty()) 0 else -1
         return SearchResult(
             query = query,
             matches = allMatches,
-            activeIndex = resolvedIndex
+            activeIndex = activeIdx
         )
     }
 
-    /**
-     * Provides ready-to-test sample documents.
-     */
     fun getSampleDocument(sampleType: SampleDocType): LoadedDocument {
-        return when (sampleType) {
-            SampleDocType.WEB_ARTICLE -> {
-                val text = """
-                    Android 15 Innovations: Edge-to-Edge and Adaptive Performance
-                    
-                    The modern Android application platform introduces enhanced edge-to-edge system insets,
-                    predictive back navigation, and dynamic window size classes. Users interact with applications
-                    across phones, foldables, and tablets.
-                    
-                    Finding text in a webpage or document is one of the most foundational user journeys.
-                    When browsing documentation, reading technical specifications, or reviewing contracts,
-                    the browser Find in Page capability allows instant jumping between matching keywords.
-                    Universal Find brings this fluid Chrome-style find bar to your workflow.
-                    
-                    Key Highlights:
-                    1. Instant case-sensitive and case-insensitive keyword discovery.
-                    2. Precise match counter: e.g. 1 of 12 occurrences highlighted with high visibility.
-                    3. Bounding box overlay alignment for OCR captures and rendered pages.
-                    4. Unicode compliance: flawlessly matches multi-lingual scripts including Devanagari.
-                    5. Strict zero-cloud privacy: all queries and image captures remain 100% on-device.
+        val (title, text) = when (sampleType) {
+            SampleDocType.WEB_ARTICLE -> Pair(
+                "Sample: Web Article (Find in Page)",
+                """
+                Chrome Find in Page Features Overview
+                
+                The Google Chrome browser features one of the most reliable and intuitive 'Find in page' experiences across desktop and mobile operating systems.
+                
+                Key functionality includes:
+                1. Immediate incremental matching as you type each letter.
+                2. Visible count badges such as 1/14 or 3/20 indicating current selection and total occurrences.
+                3. Directional navigation buttons (Previous and Next arrows) with cyclic wrap-around navigation.
+                4. Distinct highlight states: the currently selected match is glowing vibrant yellow with an orange border, while other matches are soft yellow.
+                5. An overview tick mini-map showing where matches exist across long documents.
+                
+                Universal Find brings this exact Google Chrome desktop and Android browsing luxury directly to every app, scanned receipt, PDF document, and screenshot on your phone!
                 """.trimIndent()
-                LoadedDocument(
-                    title = "Sample: Web Article (Find in Page)",
-                    type = DocumentType.PLAIN_TEXT,
-                    pages = listOf(DocumentPage(pageNumber = 1, text = text)),
-                    fullText = text
-                )
-            }
-            SampleDocType.MULTILINGUAL_INDIAN_SCRIPTS -> {
-                val text = """
-                    बहुभाषी पाठ खोज परीक्षण (Multilingual Text Search Test)
-                    
-                    यूनिवर्सल फाइंड (Universal Find) भारतीय भाषाओं और यूनिकोड पाठ के लिए पूरी तरह से अनुकूलित है।
-                    Devanagari script support includes Hindi, Marathi, Nepali, and Sanskrit.
-                    
-                    उदाहरण वाक्य (Example sentences):
-                    - भारत एक विशाल और सुंदर देश है। (India is a vast and beautiful country.)
-                    - हिंदी भाषा में खोज करना अब बहुत आसान है। (Searching in Hindi is now very easy.)
-                    - यूनिवर्सल फाइंड से आप किसी भी पृष्ठ पर शब्द खोज सकते हैं।
-                    
-                    Unicode Test Words:
-                    - नमस्ते (Namaste)
-                    - भारत (Bharat)
-                    - खोज (Search / Find)
-                    - तकनीक (Technology)
-                    - पृष्ठ (Page)
-                    
-                    Repeated occurrences test:
-                    खोज, खोज, खोज - यह तीन बार लिखा गया शब्द है।
-                    Search, Search, Search - these words repeat for index navigation testing.
+            )
+            SampleDocType.MULTILINGUAL_INDIAN_SCRIPTS -> Pair(
+                "Sample: Multilingual & Indian Scripts",
+                """
+                भारत में भाषा और प्रौद्योगिकी का संगम (Universal Find in Hindi & Indian Languages)
+                
+                यूनिवर्सल फाइंड एक आधुनिक खोज इंजन है जो देवनागरी लिपि और भारतीय भाषाओं को पूर्ण रूप से समर्थन देता है।
+                
+                मुख्य विशेषताएं:
+                - हिंदी (Hindi), मराठी (Marathi), और संस्कृत (Sanskrit) शब्दों की सटीक पहचान।
+                - मात्राओं और संयुक्त अक्षरों (जैसे: 'खोज', 'प्रौद्योगिकी', 'ज्ञान', 'भारतीय') का सटीक मिलान।
+                - OCR तकनीक द्वारा स्क्रीन और तस्वीरों में छिपे शब्दों को तुरंत खोजना।
+                
+                यह खोज प्रणाली केस-सेंसिटिव और रेगुलर एक्सप्रेशन (Regex) दोनों का समर्थन करती है।
                 """.trimIndent()
-                LoadedDocument(
-                    title = "Sample: Indian Scripts & Multilingual",
-                    type = DocumentType.PLAIN_TEXT,
-                    pages = listOf(DocumentPage(pageNumber = 1, text = text)),
-                    fullText = text
-                )
-            }
-            SampleDocType.TECHNICAL_SPEC -> {
-                val text = """
-                    SYSTEM ARCHITECTURE SPECIFICATION: Universal Find
-                    
-                    1. Overview
-                    Universal Find is designed to replicate Chrome's Find in Page functionality across Android.
-                    It operates in two principal modes:
-                    - In-App Viewport Finder: Loads documents (TXT, PDF, Images) and renders interactive overlays.
-                    - Floating Screen Finder: Runs as an overlay service (via MediaProjection and SYSTEM_ALERT_WINDOW)
-                      to allow on-screen finding over other applications.
-                      
-                    2. Security and Privacy Guarantees
-                    - All OCR processing is executed strictly on-device using Google ML Kit.
-                    - Screen captures are held in volatile memory only for the duration of the search session.
-                    - No telemetry, analytics, or screenshot data is transmitted over the network.
-                    - Banking and secure apps using WindowManager.LayoutParams.FLAG_SECURE cannot and will not
-                      be captured, strictly following Android platform security policy.
-                      
-                    3. Performance
-                    - Coordinate mapping handles aspect-ratio fitting and viewport translation.
-                    - Search query execution takes under 5ms on typical text payloads up to 100,000 characters.
+            )
+            SampleDocType.TECHNICAL_SPEC -> Pair(
+                "Sample: Android System Spec",
+                """
+                Universal Find Android Architecture Specification
+                
+                Package ID: com.aistudio.universalfind.uqzrtk
+                Target SDK: 36 (Android 15+)
+                Min SDK: 24 (Android 7.0 Nougat)
+                
+                Core Components:
+                - FloatingSearchService: SYSTEM_ALERT_WINDOW floating bubble with FLAG_NOT_FOCUSABLE.
+                - UniversalFindAccessibilityService: BIND_ACCESSIBILITY_SERVICE view hierarchy inspection.
+                - ScreenCaptureManager: MediaProjection API high-framerate buffer reader.
+                - OcrTextProvider: Google Play Services ML Kit On-Device Text Recognition.
+                - SearchEngine: NFC normalization, Boyer-Moore style indexOf, regex patterns, and Devanagari Unicode support.
+                
+                Security & Privacy:
+                All OCR inference and text indexing happens completely on-device. Zero telemetry and zero off-device network transmission. FLAG_SECURE prevents capturing DRM content.
                 """.trimIndent()
-                LoadedDocument(
-                    title = "Sample: Technical Specification",
-                    type = DocumentType.PLAIN_TEXT,
-                    pages = listOf(DocumentPage(pageNumber = 1, text = text)),
-                    fullText = text
-                )
-            }
+            )
         }
+
+        val page = DocumentPage(pageNumber = 1, text = text)
+        return LoadedDocument(
+            title = title,
+            type = DocumentType.PLAIN_TEXT,
+            pages = listOf(page),
+            fullText = text
+        )
     }
 }
 

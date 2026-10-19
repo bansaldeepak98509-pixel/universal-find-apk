@@ -26,98 +26,93 @@ data class OcrItem(
 )
 
 data class OcrResult(
-    val rawText: String,
-    val items: List<OcrItem>,
-    val imageWidth: Int,
-    val imageHeight: Int,
-    val recognizedScript: String = "Latin/Devanagari"
+    val items: List<OcrItem> = emptyList(),
+    val rawText: String = "",
+    val imageWidth: Int = 0,
+    val imageHeight: Int = 0
 )
 
-class OcrTextProvider {
+class OcrTextProvider(
+    private val useDevanagari: Boolean = true
+) {
+    private val primaryRecognizer by lazy {
+        if (useDevanagari) {
+            TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
+        } else {
+            TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        }
+    }
 
-    // Latin recognizer
-    private val latinRecognizer by lazy {
+    private val fallbackRecognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
-    // Devanagari recognizer for Hindi, Marathi, Sanskrit and related Indian scripts
-    private val devanagariRecognizer by lazy {
+    suspend fun recognizeText(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
+        val image = InputImage.fromBitmap(bitmap, 0)
         try {
-            TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
-        } catch (_: Exception) {
-            null
+            processImage(primaryRecognizer, image, bitmap.width, bitmap.height)
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            if (useDevanagari && msg.contains("download", ignoreCase = true)) {
+                // If optional Devanagari module is downloading, fallback to default bundled recognizer
+                processImage(fallbackRecognizer, image, bitmap.width, bitmap.height)
+            } else {
+                throw e
+            }
         }
     }
 
-    /**
-     * Recognizes text from a Bitmap on-device using ML Kit.
-     * Safely processes on IO dispatcher and returns bounding boxes.
-     */
-    suspend fun recognizeText(bitmap: Bitmap, preferDevanagari: Boolean = false): OcrResult =
-        withContext(Dispatchers.Default) {
-            val image = InputImage.fromBitmap(bitmap, 0)
-            val recognizer = if (preferDevanagari && devanagariRecognizer != null) {
-                devanagariRecognizer!!
-            } else {
-                latinRecognizer
-            }
+    private suspend fun processImage(
+        recognizer: com.google.mlkit.vision.text.TextRecognizer,
+        image: InputImage,
+        width: Int,
+        height: Int
+    ): OcrResult = suspendCancellableCoroutine { continuation ->
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                val items = mutableListOf<OcrItem>()
+                val fullTextBuilder = StringBuilder()
 
-            try {
-                suspendCancellableCoroutine { continuation ->
-                    recognizer.process(image)
-                        .addOnSuccessListener { visionText ->
-                            val items = mutableListOf<OcrItem>()
-                            var lineIdx = 0
-
-                            for (block in visionText.textBlocks) {
-                                for (line in block.lines) {
-                                    for (element in line.elements) {
-                                        val box = element.boundingBox ?: Rect(0, 0, 0, 0)
-                                        items.add(
-                                            OcrItem(
-                                                text = element.text,
-                                                boundingBox = MatchRect.fromAndroidRect(box),
-                                                lineIndex = lineIdx,
-                                                elementIndex = items.size
-                                            )
-                                        )
-                                    }
-                                    lineIdx++
-                                }
-                            }
-
-                            val result = OcrResult(
-                                rawText = visionText.text,
-                                items = items,
-                                imageWidth = bitmap.width,
-                                imageHeight = bitmap.height,
-                                recognizedScript = if (preferDevanagari) "Devanagari" else "Latin"
+                var lineIdx = 0
+                for (block in visionText.textBlocks) {
+                    for (line in block.lines) {
+                        var elemIdx = 0
+                        for (element in line.elements) {
+                            val box = element.boundingBox ?: Rect(0, 0, 0, 0)
+                            val matchRect = MatchRect(
+                                left = box.left.toFloat(),
+                                top = box.top.toFloat(),
+                                right = box.right.toFloat(),
+                                bottom = box.bottom.toFloat()
                             )
-                            if (continuation.isActive) {
-                                continuation.resume(result)
-                            }
+                            items.add(
+                                OcrItem(
+                                    text = element.text,
+                                    boundingBox = matchRect,
+                                    lineIndex = lineIdx,
+                                    elementIndex = elemIdx++
+                                )
+                            )
                         }
-                        .addOnFailureListener { exception ->
-                            if (continuation.isActive) {
-                                continuation.resumeWithException(exception)
-                            }
-                        }
+                        fullTextBuilder.append(line.text).append("\n")
+                        lineIdx++
+                    }
                 }
-            } catch (e: Exception) {
-                // Return empty result on failure without crashing
-                OcrResult(
-                    rawText = "",
-                    items = emptyList(),
-                    imageWidth = bitmap.width,
-                    imageHeight = bitmap.height,
-                    recognizedScript = "Error: ${e.message}"
+
+                continuation.resume(
+                    OcrResult(
+                        items = items,
+                        rawText = fullTextBuilder.toString().trim(),
+                        imageWidth = width,
+                        imageHeight = height
+                    )
                 )
             }
-        }
+            .addOnFailureListener { exception ->
+                continuation.resumeWithException(exception)
+            }
+    }
 
-    /**
-     * Maps a SearchQuery over OCR items to compute precise bounding boxes for every match.
-     */
     private val searchEngine = SearchEngine()
 
     fun findMatchesInOcr(

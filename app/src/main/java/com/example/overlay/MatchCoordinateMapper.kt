@@ -4,10 +4,6 @@ import android.graphics.PointF
 import android.graphics.RectF
 import com.example.search.MatchRect
 
-/**
- * Transforms source coordinates (from OCR or Document page render) to the display canvas/screen,
- * accounting for scale, translation/scroll, letterbox padding, and device/image rotation.
- */
 object MatchCoordinateMapper {
 
     data class ViewportTransform(
@@ -19,10 +15,6 @@ object MatchCoordinateMapper {
         val sourceHeight: Float = 0f
     )
 
-    /**
-     * Calculates the transform matrix parameters for Aspect-Fit inside a container (e.g. Image or Screen).
-     * Accounts for rotation (0, 90, 180, 270 degrees).
-     */
     fun calculateFitTransform(
         sourceWidth: Float,
         sourceHeight: Float,
@@ -57,18 +49,12 @@ object MatchCoordinateMapper {
         )
     }
 
-    /**
-     * Maps a source MatchRect into container display coordinates.
-     * Takes rotation (0, 90, 180, 270) and aspect-fit transform into account.
-     */
     fun mapToContainer(rect: MatchRect, transform: ViewportTransform): RectF {
         val sW = transform.sourceWidth
         val sH = transform.sourceHeight
 
-        // First apply rotation to the bounding box if applicable
         val (rotLeft, rotTop, rotRight, rotBottom) = when (transform.rotationDegrees) {
             90 -> {
-                // (x, y) -> (sH - y, x)
                 val newL = sH - rect.bottom
                 val newT = rect.left
                 val newR = sH - rect.top
@@ -76,7 +62,6 @@ object MatchCoordinateMapper {
                 listOf(newL, newT, newR, newB)
             }
             180 -> {
-                // (x, y) -> (sW - x, sH - y)
                 val newL = sW - rect.right
                 val newT = sH - rect.bottom
                 val newR = sW - rect.left
@@ -84,7 +69,6 @@ object MatchCoordinateMapper {
                 listOf(newL, newT, newR, newB)
             }
             270 -> {
-                // (x, y) -> (y, sW - x)
                 val newL = rect.top
                 val newT = sW - rect.right
                 val newR = rect.bottom
@@ -109,13 +93,9 @@ object MatchCoordinateMapper {
         )
     }
 
-    /**
-     * Inverse mapping from container touch/display coordinates back to source document space.
-     */
     fun mapFromContainer(point: PointF, transform: ViewportTransform): PointF {
         if (transform.scale <= 0f) return PointF(0f, 0f)
 
-        // Remove offset and inverse scale
         val unscaledX = (point.x - transform.offsetX) / transform.scale
         val unscaledY = (point.y - transform.offsetY) / transform.scale
 

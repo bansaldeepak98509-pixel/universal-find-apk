@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -46,7 +47,7 @@ fun HighlightOverlayView(
             )
 
             drawRoundRect(
-                color = Color(0xFFFBBF24).copy(alpha = 0.8f),
+                color = Color(0xFFFBC02D).copy(alpha = 0.8f),
                 topLeft = Offset(mapped.left, mapped.top),
                 size = Size(mapped.width(), mapped.height()),
                 cornerRadius = CornerRadius(4f, 4f),
@@ -54,44 +55,41 @@ fun HighlightOverlayView(
             )
         }
 
-        // 2. Draw Active Match (Vibrant Orange with bold border)
-        searchResult.activeMatch?.rect?.let { activeRect ->
-            val mapped = MatchCoordinateMapper.mapToContainer(activeRect, transform)
+        // 2. Draw Active Match (vibrant amber fill with thick orange border)
+        val activeMatch = searchResult.activeMatch
+        if (activeMatch != null && activeMatch.rect != null) {
+            val mappedActive = MatchCoordinateMapper.mapToContainer(activeMatch.rect, transform)
 
             drawRoundRect(
-                color = HighlightActiveColor.copy(alpha = 0.75f),
-                topLeft = Offset(mapped.left, mapped.top),
-                size = Size(mapped.width(), mapped.height()),
-                cornerRadius = CornerRadius(4f, 4f)
+                color = HighlightActiveColor.copy(alpha = 0.85f),
+                topLeft = Offset(mappedActive.left, mappedActive.top),
+                size = Size(mappedActive.width(), mappedActive.height()),
+                cornerRadius = CornerRadius(6f, 6f)
             )
 
             drawRoundRect(
                 color = HighlightActiveBorder,
-                topLeft = Offset(mapped.left - 1f, mapped.top - 1f),
-                size = Size(mapped.width() + 2f, mapped.height() + 2f),
-                cornerRadius = CornerRadius(5f, 5f),
-                style = Stroke(width = 2.5f)
+                topLeft = Offset(mappedActive.left - 2f, mappedActive.top - 2f),
+                size = Size(mappedActive.width() + 4f, mappedActive.height() + 4f),
+                cornerRadius = CornerRadius(6f, 6f),
+                style = Stroke(width = 3.5f)
             )
         }
 
-        // 3. Chrome-style Vertical Mini-Map Tick Marks (on right edge of viewport)
-        val gutterWidth = 6f
-        val gutterX = size.width - gutterWidth - 2f
+        // 3. Right-Hand Mini-map Scroll Tick Marks
+        val tickBarWidth = 6.dp.toPx()
+        val tickX = size.width - tickBarWidth - 2.dp.toPx()
 
         for ((index, match) in searchResult.matches.withIndex()) {
             val rect = match.rect ?: continue
-            // Relative vertical position (0.0 to 1.0)
-            val relY = (rect.top / sourceHeight).coerceIn(0f, 1f)
-            val tickY = relY * size.height
-
-            val isSelected = index == searchResult.activeIndex
-            val tickColor = if (isSelected) HighlightActiveColor else HighlightInactiveColor
-            val tickHeight = if (isSelected) 8f else 4f
+            val normY = rect.top / sourceHeight.coerceAtLeast(1f)
+            val tickY = normY * size.height
+            val isCurrent = (index == searchResult.activeIndex)
 
             drawRect(
-                color = tickColor,
-                topLeft = Offset(gutterX, (tickY - tickHeight / 2).coerceIn(0f, size.height - tickHeight)),
-                size = Size(gutterWidth, tickHeight)
+                color = if (isCurrent) HighlightActiveBorder else Color(0xFFFBC02D),
+                topLeft = Offset(tickX, tickY),
+                size = Size(tickBarWidth, if (isCurrent) 10.dp.toPx() else 4.dp.toPx())
             )
         }
     }

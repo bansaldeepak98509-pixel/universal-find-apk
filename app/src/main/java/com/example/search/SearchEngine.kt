@@ -6,145 +6,109 @@ import java.util.regex.PatternSyntaxException
 
 class SearchEngine {
 
-    /**
-     * Searches within plain text and returns a SearchResult with match offsets and context snippets.
-     */
-    fun search(sourceText: String, query: SearchQuery, activeIndex: Int = 0): SearchResult {
+    fun search(sourceText: String, query: SearchQuery): SearchResult {
         if (query.isEmpty || sourceText.isEmpty()) {
             return SearchResult(query = query, matches = emptyList(), activeIndex = -1)
         }
 
-        val matches = mutableListOf<TextMatch>()
-
         if (query.useRegex) {
-            try {
-                val flags = if (query.matchCase) 0 else (Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)
-                val pattern = Pattern.compile(query.text, flags)
-                val matcher = pattern.matcher(sourceText)
+            return searchWithRegex(sourceText, query)
+        }
 
-                var id = 0
-                while (matcher.find()) {
-                    val start = matcher.start()
-                    val end = matcher.end()
-                    if (start == end) continue // Avoid infinite loops on empty regex matches
+        val normalizedSource = Normalizer.normalize(sourceText, Normalizer.Form.NFC)
+        val normalizedQuery = Normalizer.normalize(query.text, Normalizer.Form.NFC)
 
-                    val matchedStr = sourceText.substring(start, end)
-                    val snippet = createSnippet(sourceText, start, end)
-                    matches.add(
-                        TextMatch(
-                            id = id++,
-                            start = start,
-                            end = end,
-                            matchedText = matchedStr,
-                            snippet = snippet
-                        )
+        val targetText = if (query.matchCase) normalizedQuery else normalizedQuery.lowercase()
+        val textToSearch = if (query.matchCase) normalizedSource else normalizedSource.lowercase()
+
+        val matches = mutableListOf<TextMatch>()
+        var searchStart = 0
+        var matchId = 0
+
+        while (searchStart < textToSearch.length) {
+            val foundIndex = textToSearch.indexOf(targetText, searchStart)
+            if (foundIndex < 0) break
+
+            val matchEnd = foundIndex + targetText.length
+
+            if (!query.wholeWord || isWordBoundary(normalizedSource, foundIndex, matchEnd)) {
+                val matchedSnippet = sourceText.substring(foundIndex, matchEnd)
+                val snippetWithContext = createSnippet(sourceText, foundIndex, matchEnd)
+
+                matches.add(
+                    TextMatch(
+                        id = matchId++,
+                        start = foundIndex,
+                        end = matchEnd,
+                        matchedText = matchedSnippet,
+                        snippet = snippetWithContext
                     )
-                }
-            } catch (e: PatternSyntaxException) {
-                return SearchResult(
-                    query = query,
-                    matches = emptyList(),
-                    activeIndex = -1,
-                    errorMessage = "Invalid regex: ${e.description}"
                 )
             }
-        } else {
-            // Normalized text search
-            val target = query.text
-            val normalizedSource = normalizeForSearch(sourceText, query.matchCase)
-            val normalizedTarget = normalizeForSearch(target, query.matchCase)
 
-            var searchStart = 0
-            var id = 0
-            val targetLen = normalizedTarget.length
-
-            if (targetLen == 0) {
-                return SearchResult(query = query, matches = emptyList(), activeIndex = -1)
-            }
-
-            while (searchStart < normalizedSource.length) {
-                val foundIndex = normalizedSource.indexOf(normalizedTarget, searchStart)
-                if (foundIndex < 0) break
-
-                val matchEnd = foundIndex + targetLen
-
-                val isWordMatch = if (query.wholeWord) {
-                    isWordBoundary(normalizedSource, foundIndex, matchEnd)
-                } else {
-                    true
-                }
-
-                if (isWordMatch) {
-                    val rawMatchedText = sourceText.substring(
-                        foundIndex.coerceIn(0, sourceText.length),
-                        matchEnd.coerceIn(0, sourceText.length)
-                    )
-                    val snippet = createSnippet(sourceText, foundIndex, matchEnd)
-                    matches.add(
-                        TextMatch(
-                            id = id++,
-                            start = foundIndex,
-                            end = matchEnd,
-                            matchedText = rawMatchedText,
-                            snippet = snippet
-                        )
-                    )
-                }
-
-                searchStart = foundIndex + 1 // Advance by 1 to support finding all occurrences
-            }
+            searchStart = foundIndex + 1
         }
 
-        val resolvedActiveIndex = when {
-            matches.isEmpty() -> -1
-            activeIndex in matches.indices -> activeIndex
-            activeIndex >= matches.size -> 0
-            else -> 0
-        }
-
+        val initialActiveIndex = if (matches.isNotEmpty()) 0 else -1
         return SearchResult(
             query = query,
             matches = matches,
-            activeIndex = resolvedActiveIndex
+            activeIndex = initialActiveIndex
         )
     }
 
-    /**
-     * Advances to the next match with wrap-around.
-     */
-    fun nextMatch(currentResult: SearchResult): SearchResult {
-        if (currentResult.matches.isEmpty()) return currentResult
-        val nextIdx = (currentResult.activeIndex + 1) % currentResult.matches.size
-        return currentResult.copy(activeIndex = nextIdx)
-    }
+    private fun searchWithRegex(sourceText: String, query: SearchQuery): SearchResult {
+        return try {
+            val flags = if (query.matchCase) 0 else Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
+            val patternString = if (query.wholeWord) "\\b${query.text}\\b" else query.text
+            val pattern = Pattern.compile(patternString, flags)
+            val matcher = pattern.matcher(sourceText)
 
-    /**
-     * Reverses to the previous match with wrap-around.
-     */
-    fun previousMatch(currentResult: SearchResult): SearchResult {
-        if (currentResult.matches.isEmpty()) return currentResult
-        val prevIdx = if (currentResult.activeIndex <= 0) {
-            currentResult.matches.size - 1
-        } else {
-            currentResult.activeIndex - 1
+            val matches = mutableListOf<TextMatch>()
+            var matchId = 0
+
+            while (matcher.find()) {
+                val start = matcher.start()
+                val end = matcher.end()
+                if (start == end) continue
+
+                matches.add(
+                    TextMatch(
+                        id = matchId++,
+                        start = start,
+                        end = end,
+                        matchedText = matcher.group(),
+                        snippet = createSnippet(sourceText, start, end)
+                    )
+                )
+            }
+
+            val initialActiveIndex = if (matches.isNotEmpty()) 0 else -1
+            SearchResult(
+                query = query,
+                matches = matches,
+                activeIndex = initialActiveIndex
+            )
+        } catch (e: PatternSyntaxException) {
+            SearchResult(
+                query = query,
+                matches = emptyList(),
+                activeIndex = -1,
+                errorMessage = e.description
+            )
         }
-        return currentResult.copy(activeIndex = prevIdx)
     }
 
-    /**
-     * Moves to a specific match index.
-     */
-    fun selectMatch(currentResult: SearchResult, targetIndex: Int): SearchResult {
-        if (currentResult.matches.isEmpty() || targetIndex !in currentResult.matches.indices) {
-            return currentResult
-        }
-        return currentResult.copy(activeIndex = targetIndex)
+    fun nextMatch(current: SearchResult): SearchResult {
+        if (current.matches.isEmpty()) return current
+        val next = (current.activeIndex + 1) % current.totalMatches
+        return current.copy(activeIndex = next)
     }
 
-    private fun normalizeForSearch(text: String, matchCase: Boolean): String {
-        // Unicode NFC normalization keeps combined Devanagari and accented glyphs consistent
-        val nfc = Normalizer.normalize(text, Normalizer.Form.NFC)
-        return if (matchCase) nfc else nfc.lowercase()
+    fun previousMatch(current: SearchResult): SearchResult {
+        if (current.matches.isEmpty()) return current
+        val prev = if (current.activeIndex <= 0) current.totalMatches - 1 else current.activeIndex - 1
+        return current.copy(activeIndex = prev)
     }
 
     private fun isWordBoundary(text: String, start: Int, end: Int): Boolean {
@@ -169,11 +133,8 @@ class SearchEngine {
     private fun createSnippet(source: String, start: Int, end: Int, contextRadius: Int = 30): String {
         val snippetStart = (start - contextRadius).coerceAtLeast(0)
         val snippetEnd = (end + contextRadius).coerceAtMost(source.length)
-
         val prefix = if (snippetStart > 0) "…" else ""
         val suffix = if (snippetEnd < source.length) "…" else ""
-
-        val snippetText = source.substring(snippetStart, snippetEnd).replace('\n', ' ')
-        return "$prefix$snippetText$suffix"
+        return prefix + source.substring(snippetStart, snippetEnd) + suffix
     }
 }

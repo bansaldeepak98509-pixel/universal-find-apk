@@ -1,150 +1,117 @@
 package com.example.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import java.util.ArrayList
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.search.MatchRect
-import com.example.search.SearchEngine
 import com.example.search.SearchQuery
 import com.example.search.SearchResult
 import com.example.search.TextMatch
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
-data class AccessibleNodeItem(
-    val text: String,
+data class AccessibilityNodeMatch(
+    val nodeText: String,
     val bounds: MatchRect,
-    val className: String
+    val viewId: String? = null
 )
 
 class UniversalFindAccessibilityService : AccessibilityService() {
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // We do not continuously record background events to maintain 100% privacy and zero battery drain.
-    }
+    companion object {
+        var instance: UniversalFindAccessibilityService? = null
+            private set
 
-    override fun onInterrupt() {
-        activeServiceInstance = null
+        val isServiceConnected: Boolean get() = instance != null
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        activeServiceInstance = this
-        _isServiceConnected.value = true
+        instance = this
     }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Passive listener; nodes are queried on-demand during search
+    }
+
+    override fun onInterrupt() {}
 
     override fun onDestroy() {
         super.onDestroy()
-        if (activeServiceInstance == this) {
-            activeServiceInstance = null
-        }
-        _isServiceConnected.value = false
+        instance = null
     }
 
-    /**
-     * Traverses the active window's accessibility node tree to gather visible text nodes.
-     */
-    fun extractScreenNodes(): List<AccessibleNodeItem> {
+    fun extractAllVisibleTextNodes(): List<AccessibilityNodeMatch> {
         val root = rootInActiveWindow ?: return emptyList()
-        val results = mutableListOf<AccessibleNodeItem>()
+        val results = mutableListOf<AccessibilityNodeMatch>()
         traverseNode(root, results)
         return results
     }
 
-    private fun traverseNode(node: AccessibilityNodeInfo?, list: MutableList<AccessibleNodeItem>) {
+    private fun traverseNode(node: AccessibilityNodeInfo?, results: MutableList<AccessibilityNodeMatch>) {
         if (node == null) return
 
         val text = node.text?.toString() ?: node.contentDescription?.toString()
-        if (!text.isNullOrBlank()) {
-            val rect = Rect()
-            node.getBoundsInScreen(rect)
-            if (rect.width() > 0 && rect.height() > 0) {
-                list.add(
-                    AccessibleNodeItem(
-                        text = text,
-                        bounds = MatchRect.fromAndroidRect(rect),
-                        className = node.className?.toString() ?: ""
+        if (!text.isNullOrBlank() && node.isVisibleToUser) {
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            if (!bounds.isEmpty) {
+                results.add(
+                    AccessibilityNodeMatch(
+                        nodeText = text,
+                        bounds = MatchRect(
+                            left = bounds.left.toFloat(),
+                            top = bounds.top.toFloat(),
+                            right = bounds.right.toFloat(),
+                            bottom = bounds.bottom.toFloat()
+                        ),
+                        viewId = node.viewIdResourceName
                     )
                 )
             }
         }
 
         for (i in 0 until node.childCount) {
-            traverseNode(node.getChild(i), list)
+            traverseNode(node.getChild(i), results)
         }
     }
 
-    companion object {
-        var activeServiceInstance: UniversalFindAccessibilityService? = null
-            private set
-
-        private val _isServiceConnected = MutableStateFlow(false)
-        val isServiceConnected = _isServiceConnected.asStateFlow()
-    }
-}
-
-class AccessibleTextProvider(
-    private val searchEngine: SearchEngine = SearchEngine()
-) {
-    fun isAvailable(): Boolean {
-        return UniversalFindAccessibilityService.activeServiceInstance != null
-    }
-
-    fun searchActiveScreen(query: SearchQuery, activeIndex: Int = 0): SearchResult {
-        val service = UniversalFindAccessibilityService.activeServiceInstance
-            ?: return SearchResult(
-                query = query,
-                matches = emptyList(),
-                activeIndex = -1,
-                errorMessage = "Accessibility Service is not enabled."
-            )
-
-        val nodes = service.extractScreenNodes()
-        if (nodes.isEmpty() || query.isEmpty) {
+    fun searchAccessibilityTree(query: SearchQuery): SearchResult {
+        if (query.isEmpty) {
             return SearchResult(query = query, matches = emptyList(), activeIndex = -1)
         }
 
-        val allMatches = mutableListOf<TextMatch>()
+        val nodes = extractAllVisibleTextNodes()
+        val matches = mutableListOf<TextMatch>()
         var matchId = 0
         val target = if (query.matchCase) query.text else query.text.lowercase()
 
         for (node in nodes) {
-            val nodeText = if (query.matchCase) node.text else node.text.lowercase()
-            var searchStart = 0
+            val textNorm = if (query.matchCase) node.nodeText else node.nodeText.lowercase()
+            var start = 0
+            while (start < textNorm.length) {
+                val found = textNorm.indexOf(target, start)
+                if (found < 0) break
 
-            while (searchStart < nodeText.length) {
-                val foundIdx = nodeText.indexOf(target, searchStart)
-                if (foundIdx < 0) break
-
-                val matchEnd = foundIdx + target.length
-                val matchedSnippet = node.text.substring(foundIdx, matchEnd)
-
-                allMatches.add(
+                val end = found + target.length
+                matches.add(
                     TextMatch(
                         id = matchId++,
-                        start = foundIdx,
-                        end = matchEnd,
-                        matchedText = matchedSnippet,
+                        start = found,
+                        end = end,
+                        matchedText = node.nodeText.substring(found, end),
                         rect = node.bounds,
-                        snippet = node.text
+                        snippet = node.nodeText
                     )
                 )
-
-                searchStart = foundIdx + 1
+                start = found + 1
             }
-        }
-
-        val resolvedIdx = when {
-            allMatches.isEmpty() -> -1
-            activeIndex in allMatches.indices -> activeIndex
-            else -> 0
         }
 
         return SearchResult(
             query = query,
-            matches = allMatches,
-            activeIndex = resolvedIdx
+            matches = matches,
+            activeIndex = if (matches.isNotEmpty()) 0 else -1
         )
     }
 }

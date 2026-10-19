@@ -86,12 +86,7 @@ jobs:
           )
 
           echo "Creating GitHub Release with tag: $TAG..."
-          gh release create "$TAG" \
-            "$APK_PATH" \
-            --target "${{ github.sha }}" \
-            --title "$TITLE" \
-            --notes "$NOTES" \
-            --latest
+          gh release create "$TAG"             "$APK_PATH"             --target "${{ github.sha }}"             --title "$TITLE"             --notes "$NOTES"             --latest
 
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/latest/download/app-debug.apk"

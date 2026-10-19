@@ -1,6 +1,6 @@
 {
   "name": "Universal Find",
-  "description": "Chrome-style Find in page overlay, screen search with on-device OCR, and multi-format document search.",
+  "description": "Chrome-style Find in Page for Android across all apps, documents, and screenshots using on-device ML Kit OCR",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -4,41 +4,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Document background card -->
     <path
-        android:fillColor="#1E293B"
-        android:pathData="M30,22 h36 l16,16 v48 c0,3.3 -2.7,6 -6,6 H30 c-3.3,0 -6,-2.7 -6,-6 V28 c0,-3.3 2.7,-6 6,-6 z" />
-    <path
-        android:fillColor="#334155"
-        android:pathData="M66,22 v16 h16 z" />
-    <!-- Document text lines -->
-    <path
-        android:fillColor="#64748B"
-        android:pathData="M34,42 h24 v3 H34 z" />
-    <path
-        android:fillColor="#64748B"
-        android:pathData="M34,50 h18 v3 H34 z" />
-    <!-- Highlighted match line in yellow/amber -->
-    <path
-        android:fillColor="#FBBF24"
-        android:pathData="M34,58 h30 v4 H34 z" />
-    <path
-        android:fillColor="#64748B"
-        android:pathData="M34,68 h26 v3 H34 z" />
-    <!-- Magnifying Glass Lens Outer Glow / Ring -->
-    <path
-        android:fillColor="#38BDF8"
-        android:pathData="M64,62 m-16,0 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0" />
-    <!-- Inner Lens with subtle contrast -->
-    <path
-        android:fillColor="#0284C7"
-        android:pathData="M64,62 m-11,0 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0" />
-    <!-- Active Highlight Indicator in lens -->
-    <path
-        android:fillColor="#FEF08A"
-        android:pathData="M57,60 h14 v4 H57 z" />
-    <!-- Handle -->
-    <path
-        android:fillColor="#E2E8F0"
-        android:pathData="M75,73 l13,13 c1.5,1.5 4,1.5 5.5,0 l0,0 c1.5,-1.5 1.5,-4 0,-5.5 L80.5,67.5 z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M52.5,49.5h-2.37l-0.84,-0.81A19.413,19.413 0,0 0,54 36c0,-9.94 -8.06,-18 -18,-18s-18,8.06 -18,18 8.06,18 18,18c4.83,0 9.27,-1.77 12.69,-4.71l0.81,0.84v2.37l15,14.97L67.47,64.5l-14.97,-15zm-16.5,0c-7.46,0 -13.5,-6.04 -13.5,-13.5S28.54,22.5 36,22.5 49.5,28.54 49.5,36 43.46,49.5 36,49.5z"/>
 </vector>
