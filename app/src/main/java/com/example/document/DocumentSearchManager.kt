@@ -198,7 +198,7 @@ class DocumentSearchManager(
                 4. Distinct highlight states: the currently selected match is glowing vibrant yellow with an orange border, while other matches are soft yellow.
                 5. An overview tick mini-map showing where matches exist across long documents.
                 
-                Universal Find brings this exact Google Chrome desktop and Android browsing luxury directly to every app, scanned receipt, PDF document, and screenshot on your phone!
+                Universal Find brings this exact Google Chrome desktop and Chrome-style Android browsing luxury directly to every app, scanned receipt, PDF document, and screenshot on your phone!
                 """.trimIndent()
             )
             SampleDocType.MULTILINGUAL_INDIAN_SCRIPTS -> Pair(

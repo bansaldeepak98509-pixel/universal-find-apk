@@ -15,3 +15,4 @@ val HighlightActiveBorder = Color(0xFFFF9800)  // Vivid orange border
 
 val SearchAmberAccent = Color(0xFFF29900)
 val SearchCountBg = Color(0xFFE8EAED)
+val ElectricBluePrimary = GoogleBlue

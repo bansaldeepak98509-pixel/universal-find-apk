@@ -71,7 +71,7 @@ fun FloatingGuideScreen(
 ) {
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(checkOverlayPermission(context)) }
-    val isAccessibilityConnected by UniversalFindAccessibilityService.isServiceConnected.collectAsState()
+    val isAccessibilityConnected by UniversalFindAccessibilityService.isServiceConnectedFlow.collectAsState()
     var isServiceRunning by remember { mutableStateOf(false) }
 
     // Re-check permissions when screen is viewed

@@ -34,6 +34,26 @@ class FloatingSearchService : Service() {
 
         var isServiceRunning = false
             private set
+
+        fun start(context: Context) {
+            val intent = Intent(context, FloatingSearchService::class.java).apply {
+                action = ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            isServiceRunning = true
+        }
+
+        fun stop(context: Context) {
+            val intent = Intent(context, FloatingSearchService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+            isServiceRunning = false
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

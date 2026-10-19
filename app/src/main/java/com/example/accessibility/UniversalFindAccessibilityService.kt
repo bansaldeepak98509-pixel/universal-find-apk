@@ -10,6 +10,10 @@ import com.example.search.SearchQuery
 import com.example.search.SearchResult
 import com.example.search.TextMatch
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 data class AccessibilityNodeMatch(
     val nodeText: String,
     val bounds: MatchRect,
@@ -22,12 +26,16 @@ class UniversalFindAccessibilityService : AccessibilityService() {
         var instance: UniversalFindAccessibilityService? = null
             private set
 
+        private val _isServiceConnected = MutableStateFlow(false)
+        val isServiceConnectedFlow: StateFlow<Boolean> = _isServiceConnected.asStateFlow()
+
         val isServiceConnected: Boolean get() = instance != null
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        _isServiceConnected.value = true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -39,6 +47,7 @@ class UniversalFindAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
+        _isServiceConnected.value = false
     }
 
     fun extractAllVisibleTextNodes(): List<AccessibilityNodeMatch> {

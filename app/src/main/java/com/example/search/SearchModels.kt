@@ -3,7 +3,7 @@ package com.example.search
 import android.graphics.RectF
 
 data class SearchQuery(
-    val text: String,
+    val text: String = "",
     val matchCase: Boolean = false,
     val wholeWord: Boolean = false,
     val useRegex: Boolean = false
