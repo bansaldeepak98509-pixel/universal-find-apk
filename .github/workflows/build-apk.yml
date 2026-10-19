@@ -63,6 +63,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
+          cache-disabled: true
 
       - name: Create temporary debug keystore
         working-directory: ${{ steps.locate_project.outputs.project_dir }}
@@ -142,13 +143,15 @@ jobs:
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: app-debug-apk
           path: ${{ steps.verify_apk.outputs.apk_path }}
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Prepare APK release asset
         id: prepare_asset
+        if: always() && steps.verify_apk.outcome == 'success'
         run: |
           RELEASE_DIR="${RUNNER_TEMP:-/tmp}/apk_release_${{ github.run_number }}_${{ github.run_attempt }}"
           mkdir -p "$RELEASE_DIR"
@@ -175,6 +178,7 @@ jobs:
 
       - name: Publish APK to GitHub Releases
         id: publish_release
+        if: always() && steps.prepare_asset.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
