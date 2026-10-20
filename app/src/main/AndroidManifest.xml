@@ -49,6 +49,14 @@
                 android:value="Floating search overlay widget and screen find assistant" />
         </service>
 
+        <!-- Dedicated Foreground Service for MediaProjection background capture -->
+        <service
+            android:name=".service.MediaProjectionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"
+            tools:targetApi="34" />
+
         <!-- Optional Accessibility Node search service -->
         <service
             android:name=".accessibility.UniversalFindAccessibilityService"

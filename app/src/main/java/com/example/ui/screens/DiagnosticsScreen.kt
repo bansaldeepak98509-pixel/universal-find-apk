@@ -21,10 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -115,7 +114,7 @@ fun DiagnosticsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = ElectricBluePrimary)
+                    Icon(Icons.Default.Info, contentDescription = null, tint = ElectricBluePrimary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Device & Platform",
@@ -141,7 +140,7 @@ fun DiagnosticsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Memory, contentDescription = null, tint = ElectricBluePrimary)
+                    Icon(Icons.Default.Settings, contentDescription = null, tint = ElectricBluePrimary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Subsystems & OCR Providers",
@@ -173,7 +172,7 @@ fun DiagnosticsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Speed, contentDescription = null, tint = ElectricBluePrimary)
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = ElectricBluePrimary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Search Engine Benchmark",

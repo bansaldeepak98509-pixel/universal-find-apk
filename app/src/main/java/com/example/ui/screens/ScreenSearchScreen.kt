@@ -235,8 +235,32 @@ fun ScreenSearchScreen(
             ) {
                 Button(
                     onClick = {
-                        val intent = captureManager.createScreenCaptureIntent()
-                        projectionLauncher.launch(intent)
+                        if (captureManager.isProjectionActive) {
+                            coroutineScope.launch {
+                                isCapturing = true
+                                statusText = "Capturing screen buffer…"
+                                val bitmap = captureManager.captureCurrentScreen()
+                                if (bitmap != null) {
+                                    capturedBitmap = bitmap
+                                    statusText = "Running on-device ML Kit OCR…"
+                                    try {
+                                        val ocr = ocrProvider.recognizeText(bitmap)
+                                        ocrResult = ocr
+                                        searchResult = ocrProvider.findMatchesInOcr(ocr, searchQuery)
+                                        statusText = null
+                                    } catch (e: Exception) {
+                                        val msg = e.message ?: "OCR error"
+                                        statusText = "OCR error: $msg"
+                                    }
+                                } else {
+                                    statusText = "Screen capture failed"
+                                }
+                                isCapturing = false
+                            }
+                        } else {
+                            val intent = captureManager.createScreenCaptureIntent()
+                            projectionLauncher.launch(intent)
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -246,7 +270,7 @@ fun ScreenSearchScreen(
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Capture & OCR Screen")
+                    Text(if (captureManager.isProjectionActive) "Capture & OCR Screen" else "Start Screen Capture & OCR")
                 }
 
                 if (capturedBitmap != null) {

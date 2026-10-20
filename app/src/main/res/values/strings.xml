@@ -4,4 +4,7 @@
     <string name="floating_service_notification_channel">Universal Find Overlay</string>
     <string name="floating_service_notification_title">Universal Find Active</string>
     <string name="floating_service_notification_text">Tap the floating widget on screen to search anything.</string>
+    <string name="media_projection_notification_channel">Screen Capture Service</string>
+    <string name="media_projection_notification_title">Universal Find Screen Capture Active</string>
+    <string name="media_projection_notification_text">Screen capture is running in background for on-screen search.</string>
 </resources>

@@ -23,14 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -165,7 +163,7 @@ fun FloatingGuideScreen(
                     modifier = Modifier.testTag("floating_service_toggle")
                 ) {
                     Icon(
-                        imageVector = if (isServiceRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        imageVector = if (isServiceRunning) Icons.Default.Close else Icons.Default.PlayArrow,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
@@ -189,7 +187,7 @@ fun FloatingGuideScreen(
             title = "Display Over Other Apps (Overlay)",
             description = "Allows the Chrome-style find bar and floating search trigger to float above other applications.",
             isGranted = hasOverlayPermission,
-            icon = Icons.Default.Layers,
+            icon = Icons.Default.Info,
             actionLabel = if (hasOverlayPermission) "Granted" else "Grant Permission",
             onAction = { openOverlaySettings(context) }
         )
@@ -201,7 +199,7 @@ fun FloatingGuideScreen(
             title = "Universal Find Accessibility (Optional)",
             description = "Allows reading native view hierarchy text directly without taking screenshots. Highly efficient for system apps.",
             isGranted = isAccessibilityConnected,
-            icon = Icons.Default.AccessibilityNew,
+            icon = Icons.Default.Person,
             actionLabel = if (isAccessibilityConnected) "Active" else "Enable in Settings",
             onAction = { openAccessibilitySettings(context) }
         )
