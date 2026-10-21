@@ -85,7 +85,6 @@ class MediaProjectionService : Service() {
         super.onCreate()
         instance = this
         createNotificationChannel()
-        promoteToForeground()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -97,7 +96,6 @@ class MediaProjectionService : Service() {
         }
 
         if (intent?.action == ACTION_START) {
-            promoteToForeground()
             val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
             val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -107,6 +105,10 @@ class MediaProjectionService : Service() {
             }
 
             if (resultCode == Activity.RESULT_OK && resultData != null) {
+                // Ensure notification channel is initialized before startForeground()
+                createNotificationChannel()
+                promoteToForeground()
+
                 try {
                     val projectionManager =
                         getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -127,6 +129,9 @@ class MediaProjectionService : Service() {
                 } catch (_: Exception) {
                     _isProjectionActive.value = false
                 }
+            } else {
+                stopSelf()
+                return START_NOT_STICKY
             }
         }
 
