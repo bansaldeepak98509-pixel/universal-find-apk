@@ -1,15 +1,14 @@
 package com.example.accessibility
 
 import android.accessibilityservice.AccessibilityService
-import java.util.ArrayList
 import android.graphics.Rect
+import android.graphics.RectF
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.search.MatchRect
 import com.example.search.SearchQuery
 import com.example.search.SearchResult
 import com.example.search.TextMatch
-
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,47 +49,89 @@ class UniversalFindAccessibilityService : AccessibilityService() {
         _isServiceConnected.value = false
     }
 
-    fun extractAllVisibleTextNodes(): List<AccessibilityNodeMatch> {
-        val root = rootInActiveWindow ?: return emptyList()
+    fun extractAllVisibleTextNodes(
+        excludePackage: String? = null,
+        excludeRect: RectF? = null
+    ): List<AccessibilityNodeMatch> {
         val results = mutableListOf<AccessibilityNodeMatch>()
-        traverseNode(root, results)
+
+        // Check all interactive on-screen windows (includes background apps like WhatsApp, browsers)
+        val allWindows = try {
+            windows
+        } catch (_: Exception) {
+            null
+        }
+
+        if (!allWindows.isNullOrEmpty()) {
+            for (window in allWindows) {
+                val root = window.root ?: continue
+                traverseNode(root, results, excludePackage, excludeRect)
+            }
+        } else {
+            rootInActiveWindow?.let { traverseNode(it, results, excludePackage, excludeRect) }
+        }
         return results
     }
 
-    private fun traverseNode(node: AccessibilityNodeInfo?, results: MutableList<AccessibilityNodeMatch>) {
+    private fun traverseNode(
+        node: AccessibilityNodeInfo?,
+        results: MutableList<AccessibilityNodeMatch>,
+        excludePackage: String? = null,
+        excludeRect: RectF? = null
+    ) {
         if (node == null) return
+
+        val pkg = node.packageName?.toString()
+        // 1. Exclude the app's own package so we never scan our own floating search UI
+        if (excludePackage != null && pkg == excludePackage) {
+            return
+        }
 
         val text = node.text?.toString() ?: node.contentDescription?.toString()
         if (!text.isNullOrBlank() && node.isVisibleToUser) {
             val bounds = Rect()
             node.getBoundsInScreen(bounds)
             if (!bounds.isEmpty) {
-                results.add(
-                    AccessibilityNodeMatch(
-                        nodeText = text,
-                        bounds = MatchRect(
-                            left = bounds.left.toFloat(),
-                            top = bounds.top.toFloat(),
-                            right = bounds.right.toFloat(),
-                            bottom = bounds.bottom.toFloat()
-                        ),
-                        viewId = node.viewIdResourceName
-                    )
+                val nodeRectF = RectF(
+                    bounds.left.toFloat(),
+                    bounds.top.toFloat(),
+                    bounds.right.toFloat(),
+                    bounds.bottom.toFloat()
                 )
+                // 2. Exclude nodes that fall within the overlay search bar region
+                val isInsideExclude = excludeRect != null && RectF.intersects(excludeRect, nodeRectF)
+                if (!isInsideExclude) {
+                    results.add(
+                        AccessibilityNodeMatch(
+                            nodeText = text,
+                            bounds = MatchRect(
+                                left = bounds.left.toFloat(),
+                                top = bounds.top.toFloat(),
+                                right = bounds.right.toFloat(),
+                                bottom = bounds.bottom.toFloat()
+                            ),
+                            viewId = node.viewIdResourceName
+                        )
+                    )
+                }
             }
         }
 
         for (i in 0 until node.childCount) {
-            traverseNode(node.getChild(i), results)
+            traverseNode(node.getChild(i), results, excludePackage, excludeRect)
         }
     }
 
-    fun searchAccessibilityTree(query: SearchQuery): SearchResult {
+    fun searchAccessibilityTree(
+        query: SearchQuery,
+        excludePackage: String? = null,
+        excludeRect: RectF? = null
+    ): SearchResult {
         if (query.isEmpty) {
             return SearchResult(query = query, matches = emptyList(), activeIndex = -1)
         }
 
-        val nodes = extractAllVisibleTextNodes()
+        val nodes = extractAllVisibleTextNodes(excludePackage, excludeRect)
         val matches = mutableListOf<TextMatch>()
         var matchId = 0
         val target = if (query.matchCase) query.text else query.text.lowercase()

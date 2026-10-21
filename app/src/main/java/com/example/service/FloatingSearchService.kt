@@ -7,14 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
-import android.content.res.ColorStateList
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.text.Editable
@@ -38,13 +36,14 @@ import com.example.R
 import com.example.accessibility.UniversalFindAccessibilityService
 import com.example.ocr.OcrResult
 import com.example.ocr.OcrTextProvider
-import com.example.search.SearchEngine
 import com.example.search.SearchQuery
 import com.example.search.SearchResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -64,11 +63,10 @@ class FloatingSearchService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val ocrProvider by lazy { OcrTextProvider() }
-    private val searchEngine = SearchEngine()
 
-    private var cachedOcrResult: OcrResult? = null
     private var currentSearchResult = SearchResult(query = SearchQuery(text = ""))
     private var currentQueryText = ""
+    private var searchDebounceJob: Job? = null
 
     private var counterTextView: TextView? = null
     private var queryEditText: EditText? = null
@@ -213,8 +211,6 @@ class FloatingSearchService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isClick) {
-                        // FIX: Do NOT open MainActivity via Intent.
-                        // Directly expand / toggle the WindowManager search UI overlay!
                         toggleSearchOverlay()
                     }
                     true
@@ -248,19 +244,27 @@ class FloatingSearchService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        // 1. Highlight Overlay View (fullscreen transparent canvas for yellow search match boxes)
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+
+        // 1. Highlight Overlay View (fullscreen transparent canvas for background search match boxes)
         if (highlightOverlayView == null) {
             val canvasView = HighlightCanvasView(this)
             val hParams = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                metrics.widthPixels,
+                metrics.heightPixels,
                 layoutType,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
-            )
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 0
+            }
             highlightOverlayView = canvasView
             highlightOverlayParams = hParams
             try {
@@ -270,12 +274,9 @@ class FloatingSearchService : Service() {
             highlightOverlayView?.visibility = View.VISIBLE
         }
 
-        // 2. Search Bar View (Chrome-style floating Find in Page toolbar)
+        // 2. Search Bar View (Chrome-style floating Find toolbar)
         if (searchBarView == null) {
             val barView = createSearchBarView()
-            val metrics = DisplayMetrics()
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.getMetrics(metrics)
             val barWidth = (metrics.widthPixels * 0.94f).toInt().coerceAtMost(dpToPx(480))
 
             val sParams = WindowManager.LayoutParams(
@@ -298,8 +299,10 @@ class FloatingSearchService : Service() {
             searchBarView?.visibility = View.VISIBLE
         }
 
-        // Immediately trigger background screen OCR or Accessibility capture
-        scanScreenForMatches()
+        // If query already entered, trigger fresh scan
+        if (currentQueryText.isNotBlank()) {
+            onQueryChanged(currentQueryText)
+        }
 
         // Focus search input
         queryEditText?.requestFocus()
@@ -364,8 +367,10 @@ class FloatingSearchService : Service() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    currentQueryText = s?.toString() ?: ""
-                    applySearchQuery(currentQueryText)
+                    val query = s?.toString() ?: ""
+                    currentQueryText = query
+                    // REQUIREMENT 3: Force fresh screen capture & update matches whenever query changes
+                    onQueryChanged(query)
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
@@ -398,7 +403,10 @@ class FloatingSearchService : Service() {
 
         // Scan/Refresh Button (↻)
         val refreshBtn = createToolbarButton("↻") {
-            scanScreenForMatches()
+            serviceScope.launch {
+                counterTextView?.text = "Scanning…"
+                scanScreenForMatches()
+            }
         }
         root.addView(refreshBtn)
 
@@ -429,68 +437,120 @@ class FloatingSearchService : Service() {
         }
     }
 
-    private fun scanScreenForMatches() {
-        serviceScope.launch {
-            counterTextView?.text = "Scanning…"
-
-            // 1. Try Foreground MediaProjection Service capture first
-            if (MediaProjectionService.isProjectionActive) {
-                try {
-                    val bitmap = MediaProjectionService.captureCurrentScreen()
-                    if (bitmap != null) {
-                        val ocr = withContext(Dispatchers.Default) {
-                            ocrProvider.recognizeText(bitmap)
-                        }
-                        cachedOcrResult = ocr
-                        applySearchQuery(currentQueryText)
-                        return@launch
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // 2. Try Accessibility Service if connected
-            val accessibilityService = UniversalFindAccessibilityService.instance
-            if (accessibilityService != null) {
-                val query = SearchQuery(text = currentQueryText)
-                val result = accessibilityService.searchAccessibilityTree(query)
-                currentSearchResult = result
-                highlightOverlayView?.searchResult = result
-                counterTextView?.text = result.displayCounter
-                return@launch
-            }
-
-            // Neither is active
-            counterTextView?.text = if (currentQueryText.isBlank()) "0/0" else "Start Capture"
-        }
-    }
-
-    private fun applySearchQuery(queryText: String) {
-        val query = SearchQuery(text = queryText)
-        if (query.isEmpty) {
-            currentSearchResult = SearchResult(query = query)
+    private fun onQueryChanged(query: String) {
+        if (query.trim().isEmpty()) {
+            currentSearchResult = SearchResult(query = SearchQuery(text = ""))
             highlightOverlayView?.searchResult = currentSearchResult
             counterTextView?.text = "0/0"
             return
         }
 
-        val ocr = cachedOcrResult
-        if (ocr != null) {
-            val result = ocrProvider.findMatchesInOcr(ocr, query)
-            currentSearchResult = result
-            highlightOverlayView?.searchResult = result
-            counterTextView?.text = result.displayCounter
+        // Cancel previous pending search job for typing responsiveness
+        searchDebounceJob?.cancel()
+        searchDebounceJob = serviceScope.launch {
+            delay(120) // Brief debounce to allow fluid typing without choking frame reader
+            counterTextView?.text = "Scanning…"
+            scanScreenForMatches()
+        }
+    }
+
+    private fun getOverlayExcludeRect(): RectF? {
+        val bar = searchBarView ?: return null
+        val loc = IntArray(2)
+        bar.getLocationOnScreen(loc)
+        return RectF(
+            loc[0].toFloat() - 20f,
+            loc[1].toFloat() - 20f,
+            (loc[0] + bar.width).toFloat() + 20f,
+            (loc[1] + bar.height).toFloat() + 20f
+        )
+    }
+
+    private fun getBubbleExcludeRect(): RectF? {
+        val bubble = floatingBubbleView ?: return null
+        val loc = IntArray(2)
+        bubble.getLocationOnScreen(loc)
+        return RectF(
+            loc[0].toFloat() - 20f,
+            loc[1].toFloat() - 20f,
+            (loc[0] + bubble.width).toFloat() + 20f,
+            (loc[1] + bubble.height).toFloat() + 20f
+        )
+    }
+
+    private suspend fun scanScreenForMatches() {
+        val queryText = currentQueryText
+        if (queryText.isBlank()) {
+            currentSearchResult = SearchResult(query = SearchQuery(text = ""))
+            highlightOverlayView?.searchResult = currentSearchResult
+            counterTextView?.text = "0/0"
             return
         }
 
+        val barRect = getOverlayExcludeRect()
+        val bubbleRect = getBubbleExcludeRect()
+
+        // 1. Try Foreground MediaProjection Service capture first
+        if (MediaProjectionService.isProjectionActive) {
+            try {
+                val bitmap = MediaProjectionService.captureCurrentScreen()
+                if (bitmap != null) {
+                    val ocr = withContext(Dispatchers.Default) {
+                        ocrProvider.recognizeText(bitmap)
+                    }
+
+                    // REQUIREMENT 1: Completely filter out any OCR bounding boxes belonging to the overlay search UI
+                    val backgroundItems = ocr.items.filterNot { item ->
+                        val r = RectF(
+                            item.boundingBox.left,
+                            item.boundingBox.top,
+                            item.boundingBox.right,
+                            item.boundingBox.bottom
+                        )
+                        (barRect != null && RectF.intersects(barRect, r)) ||
+                        (bubbleRect != null && RectF.intersects(bubbleRect, r))
+                    }
+
+                    val cleanOcr = ocr.copy(items = backgroundItems)
+                    val result = ocrProvider.findMatchesInOcr(cleanOcr, SearchQuery(queryText))
+                    currentSearchResult = result
+
+                    // REQUIREMENT 2: Accurately map bounding boxes to screen dimensions
+                    highlightOverlayView?.updateResults(
+                        result = result,
+                        sWidth = bitmap.width.toFloat(),
+                        sHeight = bitmap.height.toFloat()
+                    )
+                    counterTextView?.text = result.displayCounter
+                    return
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Try Accessibility Service (with windows + app package exclusion)
         val accessibilityService = UniversalFindAccessibilityService.instance
         if (accessibilityService != null) {
-            val result = accessibilityService.searchAccessibilityTree(query)
+            val result = accessibilityService.searchAccessibilityTree(
+                query = SearchQuery(queryText),
+                excludePackage = packageName,
+                excludeRect = barRect
+            )
             currentSearchResult = result
-            highlightOverlayView?.searchResult = result
+
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+
+            highlightOverlayView?.updateResults(
+                result = result,
+                sWidth = metrics.widthPixels.toFloat(),
+                sHeight = metrics.heightPixels.toFloat()
+            )
             counterTextView?.text = result.displayCounter
             return
         }
 
+        // Neither active
         counterTextView?.text = "0/0"
     }
 
@@ -552,15 +612,25 @@ class FloatingSearchService : Service() {
 
 /**
  * Dedicated transparent full-screen Canvas view for drawing yellow/amber
- * Chrome-style match highlights directly on top of third-party apps in WindowManager.
+ * Chrome-style match highlights directly over background app text in WindowManager.
  */
 class HighlightCanvasView(context: Context) : View(context) {
+
+    var sourceWidth: Float = 0f
+    var sourceHeight: Float = 0f
 
     var searchResult: SearchResult = SearchResult(query = SearchQuery(text = ""))
         set(value) {
             field = value
             invalidate()
         }
+
+    fun updateResults(result: SearchResult, sWidth: Float, sHeight: Float) {
+        this.sourceWidth = sWidth
+        this.sourceHeight = sHeight
+        this.searchResult = result
+        invalidate()
+    }
 
     private val inactiveFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x88FFF176.toInt() // Soft translucent yellow
@@ -601,13 +671,22 @@ class HighlightCanvasView(context: Context) : View(context) {
 
         val activeIdx = searchResult.activeIndex
 
+        // Accurately map coordinates to screen canvas dimensions
+        val scaleX = if (sourceWidth > 0f && width > 0) width.toFloat() / sourceWidth else 1.0f
+        val scaleY = if (sourceHeight > 0f && height > 0) height.toFloat() / sourceHeight else 1.0f
+
         // 1. Draw inactive matches
         for ((idx, match) in matches.withIndex()) {
             if (idx == activeIdx) continue
             val rect = match.rect ?: continue
-            val r = RectF(rect.left, rect.top, rect.right, rect.bottom)
-            canvas.drawRoundRect(r, 8f, 8f, inactiveFillPaint)
-            canvas.drawRoundRect(r, 8f, 8f, inactiveStrokePaint)
+            val r = RectF(
+                rect.left * scaleX,
+                rect.top * scaleY,
+                rect.right * scaleX,
+                rect.bottom * scaleY
+            )
+            canvas.drawRoundRect(r, 6f, 6f, inactiveFillPaint)
+            canvas.drawRoundRect(r, 6f, 6f, inactiveStrokePaint)
         }
 
         // 2. Draw active match
@@ -615,7 +694,12 @@ class HighlightCanvasView(context: Context) : View(context) {
             val active = matches[activeIdx]
             val rect = active.rect
             if (rect != null) {
-                val r = RectF(rect.left, rect.top, rect.right, rect.bottom)
+                val r = RectF(
+                    rect.left * scaleX,
+                    rect.top * scaleY,
+                    rect.right * scaleX,
+                    rect.bottom * scaleY
+                )
                 canvas.drawRoundRect(r, 8f, 8f, activeFillPaint)
                 canvas.drawRoundRect(r, 8f, 8f, activeStrokePaint)
             }
@@ -624,12 +708,12 @@ class HighlightCanvasView(context: Context) : View(context) {
         // 3. Mini-map ticks on right margin
         val tickWidth = 12f
         val tickX = width.toFloat() - tickWidth
-        val screenHeight = height.toFloat().coerceAtLeast(1f)
+        val viewH = height.toFloat().coerceAtLeast(1f)
 
         for ((idx, match) in matches.withIndex()) {
             val rect = match.rect ?: continue
-            val normY = (rect.top / screenHeight).coerceIn(0f, 1f)
-            val y = normY * screenHeight
+            val normY = (rect.top * scaleY) / viewH
+            val y = (normY * viewH).coerceIn(0f, viewH - 24f)
             val isCurrent = (idx == activeIdx)
             val tickHeight = if (isCurrent) 22f else 8f
             val p = if (isCurrent) activeTickPaint else tickPaint
