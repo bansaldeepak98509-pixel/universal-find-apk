@@ -554,9 +554,20 @@ class FloatingSearchService : Service() {
         counterTextView?.text = "0/0"
     }
 
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        queryEditText?.let {
+            it.clearFocus()
+            imm?.hideSoftInputFromWindow(it.windowToken, 0)
+        }
+    }
+
     private fun navigateMatch(forward: Boolean) {
         val matches = currentSearchResult.matches
         if (matches.isEmpty()) return
+
+        // Hide keyboard on arrow navigation clicks so bottom screen is not blocked
+        hideKeyboard()
 
         val total = matches.size
         val newIndex = if (forward) {
@@ -568,6 +579,33 @@ class FloatingSearchService : Service() {
         currentSearchResult = currentSearchResult.copy(activeIndex = newIndex)
         highlightOverlayView?.searchResult = currentSearchResult
         counterTextView?.text = currentSearchResult.displayCounter
+
+        // Auto-Scroll for Hidden Words:
+        // When navigating to the next/prev match, if target MatchRect is out of visible bounds
+        // or under the keyboard/overlay, scroll it into the viewport automatically.
+        val activeMatch = matches[newIndex]
+        val rect = activeMatch.rect
+        if (rect != null) {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+
+            val accessibilityService = UniversalFindAccessibilityService.instance
+            if (accessibilityService != null) {
+                val didScroll = accessibilityService.scrollToMakeVisible(
+                    matchRect = rect,
+                    screenHeight = metrics.heightPixels,
+                    screenWidth = metrics.widthPixels
+                )
+                if (didScroll) {
+                    // Trigger fresh background scan after scroll settle so highlights match new viewport
+                    serviceScope.launch {
+                        delay(400)
+                        scanScreenForMatches()
+                    }
+                }
+            }
+        }
     }
 
     private fun dpToPx(dp: Int): Int {

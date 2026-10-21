@@ -16,37 +16,43 @@ class SearchEngine {
         }
 
         val normalizedSource = Normalizer.normalize(sourceText, Normalizer.Form.NFC)
-        val normalizedQuery = Normalizer.normalize(query.text, Normalizer.Form.NFC)
+        val normalizedQuery = query.copy(text = Normalizer.normalize(query.text, Normalizer.Form.NFC))
 
-        val targetText = if (query.matchCase) normalizedQuery else normalizedQuery.lowercase()
-        val textToSearch = if (query.matchCase) normalizedSource else normalizedSource.lowercase()
+        val pattern = buildNormalizedPattern(normalizedQuery) ?: return SearchResult(
+            query = query,
+            matches = emptyList(),
+            activeIndex = -1
+        )
 
+        val matcher = pattern.matcher(normalizedSource)
         val matches = mutableListOf<TextMatch>()
         var searchStart = 0
         var matchId = 0
 
-        while (searchStart < textToSearch.length) {
-            val foundIndex = textToSearch.indexOf(targetText, searchStart)
-            if (foundIndex < 0) break
+        while (searchStart < normalizedSource.length && matcher.find(searchStart)) {
+            val start = matcher.start()
+            val end = matcher.end()
+            if (start == end) {
+                searchStart = start + 1
+                continue
+            }
 
-            val matchEnd = foundIndex + targetText.length
-
-            if (!query.wholeWord || isWordBoundary(normalizedSource, foundIndex, matchEnd)) {
-                val matchedSnippet = sourceText.substring(foundIndex, matchEnd)
-                val snippetWithContext = createSnippet(sourceText, foundIndex, matchEnd)
+            if (!query.wholeWord || isWordBoundary(normalizedSource, start, end)) {
+                val matchedSnippet = sourceText.substring(start, end)
+                val snippetWithContext = createSnippet(sourceText, start, end)
 
                 matches.add(
                     TextMatch(
                         id = matchId++,
-                        start = foundIndex,
-                        end = matchEnd,
+                        start = start,
+                        end = end,
                         matchedText = matchedSnippet,
                         snippet = snippetWithContext
                     )
                 )
             }
 
-            searchStart = foundIndex + 1
+            searchStart = start + 1
         }
 
         val initialActiveIndex = if (matches.isNotEmpty()) 0 else -1
@@ -55,6 +61,72 @@ class SearchEngine {
             matches = matches,
             activeIndex = initialActiveIndex
         )
+    }
+
+    private fun buildNormalizedPattern(query: SearchQuery): Pattern? {
+        val trimmed = query.text.trim()
+        if (trimmed.isEmpty()) return null
+
+        val sb = StringBuilder()
+        var i = 0
+        val len = trimmed.length
+
+        while (i < len) {
+            val c = trimmed[i]
+            when {
+                c.isWhitespace() -> {
+                    // Collapse any sequence of whitespace or punctuation in query to flexible separator
+                    while (i < len && (trimmed[i].isWhitespace() || isPunctuation(trimmed[i]))) {
+                        i++
+                    }
+                    sb.append("[\\s\\p{Punct}\\p{P}\\p{S}]+")
+                }
+                isPunctuation(c) -> {
+                    // Punctuation in query (e.g. hyphens, apostrophes) matches 0 or more punctuation/whitespace in source
+                    while (i < len && isPunctuation(trimmed[i])) {
+                        i++
+                    }
+                    sb.append("[\\s\\p{Punct}\\p{P}\\p{S}]*")
+                }
+                else -> {
+                    sb.append(Pattern.quote(c.toString()))
+                    i++
+                }
+            }
+        }
+
+        val patternString = sb.toString()
+        if (patternString.isEmpty()) return null
+
+        val flags = if (query.matchCase) 0 else (Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)
+        return try {
+            Pattern.compile(patternString, flags)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun isPunctuation(c: Char): Boolean {
+        if (Character.isLetterOrDigit(c) || isCombiningMark(c) || Character.isWhitespace(c)) return false
+        val type = Character.getType(c)
+        return type == Character.CONNECTOR_PUNCTUATION.toInt() ||
+                type == Character.DASH_PUNCTUATION.toInt() ||
+                type == Character.START_PUNCTUATION.toInt() ||
+                type == Character.END_PUNCTUATION.toInt() ||
+                type == Character.INITIAL_QUOTE_PUNCTUATION.toInt() ||
+                type == Character.FINAL_QUOTE_PUNCTUATION.toInt() ||
+                type == Character.OTHER_PUNCTUATION.toInt() ||
+                type == Character.MATH_SYMBOL.toInt() ||
+                type == Character.CURRENCY_SYMBOL.toInt() ||
+                type == Character.MODIFIER_SYMBOL.toInt() ||
+                type == Character.OTHER_SYMBOL.toInt()
+    }
+
+    private fun isCombiningMark(c: Char): Boolean {
+        val type = Character.getType(c)
+        return type == Character.NON_SPACING_MARK.toInt() ||
+                type == Character.COMBINING_SPACING_MARK.toInt() ||
+                type == Character.ENCLOSING_MARK.toInt()
     }
 
     private fun searchWithRegex(sourceText: String, query: SearchQuery): SearchResult {

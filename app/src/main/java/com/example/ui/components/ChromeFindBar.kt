@@ -47,6 +47,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +72,8 @@ fun ChromeFindBar(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var showOptionsMenu by remember { mutableStateOf(false) }
 
     Surface(
@@ -162,7 +166,11 @@ fun ChromeFindBar(
 
                 // Previous Match Button
                 IconButton(
-                    onClick = onPreviousMatch,
+                    onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        onPreviousMatch()
+                    },
                     enabled = searchResult.totalMatches > 0,
                     modifier = Modifier
                         .size(40.dp)
@@ -177,7 +185,11 @@ fun ChromeFindBar(
 
                 // Next Match Button
                 IconButton(
-                    onClick = onNextMatch,
+                    onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        onNextMatch()
+                    },
                     enabled = searchResult.totalMatches > 0,
                     modifier = Modifier
                         .size(40.dp)
